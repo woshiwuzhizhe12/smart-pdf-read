@@ -1,0 +1,47 @@
+{
+  "pdf_folder": "",
+  "reader_highlight_color": "#ffc832",
+  "reader_open_counts": {
+    "F:\\BJZY-FOCUS\\U-updata self system\\Python-excel-pdf-reduce\\Python-excel-pdf-reduce-software\\_t1.pdf": 2,
+    "F:\\BJZY-FOCUS\\U-updata self system\\Python-excel-pdf-reduce\\Python-excel-pdf-reduce-software\\_t2.pdf": 2
+  },
+  "reader_resume": {},
+  "reader_annotations": {},
+  "reader_page_marks": {
+    "F:\\BJZY-FOCUS\\U-updata self system\\Python-excel-pdf-reduce\\Python-excel-pdf-reduce-software\\_t1.pdf": {
+      "0": [
+        {
+          "rect": [
+            4.8,
+            4.8,
+            24.0,
+            24.0
+          ],
+          "color": "#ffdc00"
+        },
+        {
+          "rect": [
+            10.258620689655173,
+            10.258620689655173,
+            51.293103448275865,
+            51.293103448275865
+          ],
+          "color": "#ffdc00",
+          "label": "t",
+          "note": "n"
+        }
+      ]
+    }
+  },
+  "reader_text_marks": {},
+  "reader_text_hl": {},
+  "reader_theme": "normal",
+  "reader_crop_margins": false,
+  "reader_fit_width": true,
+  "reader_scroll_lines": 3,
+  "reader_body_crop_regions": {},
+  "excel_search_search_path": "F:\\BJZY-FOCUS\\U-updata self system\\Python-excel-pdf-reduce\\Python-excel-pdf-reduce-software",
+  "excel_search_recent_paths": [],
+  "excel_search_recursive": true,
+  "shortcut_bindings": {}
+}

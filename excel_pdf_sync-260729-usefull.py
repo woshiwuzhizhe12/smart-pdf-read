@@ -1063,6 +1063,7 @@ class ExcelPdfSync(tk.Tk):
         self._reader_fit_width2 = True
         self._reader_tk_img2 = None
         self._reader_dual_visible = False
+        self._cross_send_enabled = tk.BooleanVar(value=False)  # 跨程序发送(已停用，保留状态避免残留引用报错)
         self._reader2_resize_job = None
         self._reader_aux = {}
         self._reader_active_slot = 1
@@ -6839,12 +6840,6 @@ class ExcelPdfSync(tk.Tk):
         opened = sum(
             1 for state in self._reader_aux.values() if state["visible"])
         self._reader_dual_visible = opened > 0
-        if opened:
-            self._reader_dual_btn.config(
-                bg=ACCENT, text=f"▦ 当前PDF {self._reader_active_slot}")
-        else:
-            self._reader_dual_btn.config(
-                bg="#454b63", text="▦ 当前PDF 1")
 
     def _reader_aux_load_toc(self, slot):
         state = self._reader_aux[slot]
