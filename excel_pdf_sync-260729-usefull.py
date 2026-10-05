@@ -1299,6 +1299,16 @@ class ExcelPdfSync(tk.Tk):
     # ════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
+        # ── 顶部工具栏（外观主题切换）──
+        bar = tk.Frame(self, bg=PANEL, height=52)
+        bar.pack(fill=tk.X)
+        bar.pack_propagate(False)
+        self._app_theme_btn = RoundedButton(
+            bar, text="✦ 外观", bg=TEXT,
+            font=("Microsoft YaHei UI", 9, "bold"), padx=9, pady=5,
+            cursor="hand2", command=self._show_app_theme_menu)
+        self._app_theme_btn.pack(side=tk.RIGHT, padx=(4, 8), pady=10)
+
         # ── 主体区（Notebook分页）──
         self._body_frame = tk.Frame(self, bg=BG)
         self._body_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
@@ -1869,6 +1879,29 @@ class ExcelPdfSync(tk.Tk):
                 self._excel_search_recent_paths = [p for p in _esrp if isinstance(p, str)][:10]
             if isinstance(data.get("excel_search_recursive"), bool):
                 self._excel_search_recursive.set(data["excel_search_recursive"])
+            # 外观主题
+            saved_theme = data.get("app_theme", "daylight")
+            if saved_theme in self._app_themes:
+                self._app_theme.set(saved_theme)
+                self.after_idle(lambda: self._apply_app_theme(persist=False))
+            # 搜索历史（Everything 等搜索栏）
+            search_histories = data.get("search_histories", {})
+            if isinstance(search_histories, dict):
+                cleaned_hist = {}
+                for bar_key, inner in search_histories.items():
+                    if not isinstance(inner, dict):
+                        continue
+                    cleaned_inner = {}
+                    for kw, cnt in inner.items():
+                        try:
+                            n = int(cnt)
+                            if n > 0:
+                                cleaned_inner[str(kw)] = n
+                        except (TypeError, ValueError):
+                            continue
+                    if cleaned_inner:
+                        cleaned_hist[str(bar_key)] = cleaned_inner
+                self._search_histories = cleaned_hist
         except Exception:
             self._reader_dir = ""
     def _save_config(self):
@@ -1893,6 +1926,8 @@ class ExcelPdfSync(tk.Tk):
                     "excel_search_search_path": self._excel_search_search_path,
                     "excel_search_recent_paths": self._excel_search_recent_paths,
                     "excel_search_recursive": self._excel_search_recursive.get(),
+                    "app_theme": self._app_theme.get(),
+                    "search_histories": getattr(self, "_search_histories", {}),
                     "shortcut_bindings": getattr(self, "_shortcut_bindings", {}),
                 }, f, indent=2)
         except Exception:
@@ -2671,6 +2706,54 @@ class ExcelPdfSync(tk.Tk):
 
         tk.Frame(left, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
 
+        # ── Everything 全局搜索 ──
+        search_hdr = tk.Frame(left, bg=PANEL)
+        search_hdr.pack(fill=tk.X, padx=8, pady=(2, 0))
+        tk.Label(search_hdr, text="\U0001f50d Everything 搜索", bg=PANEL, fg=TEXT,
+                 font=("Microsoft YaHei UI", 9, "bold"), anchor="w").pack(fill=tk.X)
+
+        self._everything_query = tk.StringVar(value="")
+        eq_f = tk.Frame(search_hdr, bg=PANEL)
+        eq_f.pack(fill=tk.X, pady=(2, 0))
+        eq_entry = tk.Entry(eq_f, textvariable=self._everything_query,
+                            bg=ENTRY, fg=TEXT, insertbackground=TEXT,
+                            relief=tk.FLAT, font=("Microsoft YaHei UI", 9))
+        eq_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
+        self._bind_reader_text_input(eq_entry)
+        eq_entry.bind("<Return>", lambda e: self._everything_search())
+        self._bind_search_history(
+            eq_entry, "everything",
+            lambda kw: (self._everything_query.set(kw), self._everything_search()))
+        RoundedButton(eq_f, text="搜索", bg=ACCENT, fg="white", relief=tk.FLAT,
+                  font=("Microsoft YaHei UI", 8), padx=8, cursor="hand2",
+                  command=self._everything_search).pack(side=tk.RIGHT, padx=(4, 0))
+
+        eq_tip = tk.Label(search_hdr, text="空格分隔多关键词，回车执行搜索",
+                          bg=PANEL, fg=DIM, font=("Microsoft YaHei UI", 7), anchor="w")
+        eq_tip.pack(fill=tk.X, pady=(0, 2))
+
+        # 常用文件格式快捷筛选
+        eq_quick_f = tk.Frame(search_hdr, bg=PANEL)
+        eq_quick_f.pack(fill=tk.X, pady=(0, 2))
+        for ext_label in (".epub", ".pdf", ".ppt", ".jpg", ".png"):
+            RoundedButton(
+                eq_quick_f, text=ext_label, bg=ENTRY, fg=TEXT, relief=tk.FLAT,
+                font=("Microsoft YaHei UI", 7), padx=6, cursor="hand2",
+                command=lambda e=ext_label: self._everything_quick_filter(e)
+            ).pack(side=tk.LEFT, padx=(0, 4))
+
+        # Everything 搜索状态 + 清除按钮
+        eq_status_f = tk.Frame(left, bg=PANEL)
+        eq_status_f.pack(fill=tk.X, padx=8, pady=(0, 2))
+        self._everything_info = tk.StringVar(value="Everything 就绪")
+        tk.Label(eq_status_f, textvariable=self._everything_info, bg=PANEL, fg=DIM,
+                 font=("Microsoft YaHei UI", 8), anchor="w").pack(side=tk.LEFT)
+        RoundedButton(eq_status_f, text="返回文件夹", bg="#454b63", fg="white",
+                  relief=tk.FLAT, font=("Microsoft YaHei UI", 8), padx=6,
+                  cursor="hand2", command=self._everything_clear).pack(side=tk.RIGHT)
+
+        tk.Frame(left, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
+
         # 搜索过滤
         fhdr = tk.Frame(left, bg=PANEL)
         fhdr.pack(fill=tk.X, padx=8, pady=(2, 0))
@@ -2882,6 +2965,29 @@ class ExcelPdfSync(tk.Tk):
                                      padx=6, cursor="hand2",
                                      command=self._show_theme_menu)
         self._theme_btn.pack(side=tk.RIGHT, padx=1)
+
+        self._reader_dual_btn = RoundedButton(
+            nav_btn_frame, text="▦ 多开", bg="#454b63", fg="white",
+            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
+            padx=6, cursor="hand2", command=self._show_reader_dual_menu)
+        self._reader_dual_btn.pack(side=tk.RIGHT, padx=1)
+
+        self._reader_match_nav_btn = RoundedButton(
+            nav_btn_frame, text="≡ 匹配", bg=ACCENT, fg="white",
+            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
+            padx=6, cursor="hand2", command=self._toggle_match_col)
+        self._reader_match_nav_btn.pack(side=tk.RIGHT, padx=1)
+
+        # 联动搜索切换按钮
+        _ll_colors = {True: GREEN, False: "#454b63"}
+        _ll_labels = {True: "🔗 联动搜索:开", False: "🔗 联动搜索:关"}
+        self._reader_linked_btn = RoundedButton(
+            nav_btn_frame, text=_ll_labels[self._reader_linked_search.get()],
+            bg=_ll_colors[self._reader_linked_search.get()],
+            fg="white", relief=tk.FLAT,
+            font=("Microsoft YaHei UI", 8, "bold"), padx=6, cursor="hand2",
+            command=self._toggle_reader_linked_search)
+        self._reader_linked_btn.pack(side=tk.RIGHT, padx=1)
 
         # 始终可见的文件栏开关；左侧栏完全隐藏后仍可从这里恢复。
         self._reader_left_nav_btn = RoundedButton(
@@ -3283,6 +3389,17 @@ class ExcelPdfSync(tk.Tk):
         # 存储当前匹配页码列表
         self._reader_match_pages = []
         self._reader_match_counts = {}
+
+        # 左侧搜索栏历史：{栏key: {关键词: 搜索次数}}，下拉按次数降序
+        if not hasattr(self, "_search_histories"):
+            self._search_histories = {}
+        self._search_history_max = 50
+        self._search_history_win = None
+        self._search_history_lb = None
+        self._search_history_items = []
+        self._search_history_apply = None
+        # 点击窗口任意处关闭搜索历史下拉（点击落在下拉内部时忽略）
+        self.bind_all("<Button-1>", self._on_global_click, add="+")
 
         self.after_idle(lambda: self._reader_set_active_slot(1))
 
@@ -4065,6 +4182,8 @@ class ExcelPdfSync(tk.Tk):
             state["frame"].config(
                 highlightbackground=ACCENT if aux_slot == slot else BORDER,
                 highlightthickness=2 if aux_slot == slot else 1)
+        if hasattr(self, "_reader_dual_btn"):
+            self._reader_dual_btn.config(text=f"▦ 当前PDF {slot}")
         self._reader_update_active_page_info()
 
     # ── 滚轮横滚模式 ──
@@ -6840,6 +6959,13 @@ class ExcelPdfSync(tk.Tk):
         opened = sum(
             1 for state in self._reader_aux.values() if state["visible"])
         self._reader_dual_visible = opened > 0
+        if hasattr(self, "_reader_dual_btn"):
+            if opened:
+                self._reader_dual_btn.config(
+                    bg=ACCENT, text=f"▦ 当前PDF {self._reader_active_slot}")
+            else:
+                self._reader_dual_btn.config(
+                    bg="#454b63", text="▦ 当前PDF 1")
 
     def _reader_aux_load_toc(self, slot):
         state = self._reader_aux[slot]
@@ -10246,6 +10372,12 @@ class ExcelPdfSync(tk.Tk):
         if self._reader_text_hl_mode and clicked_rect:
             self._reader_save_text_hl(target_page, clicked_rect, clicked_word)
 
+        # 联动搜索：如果开启，同步搜索所有已打开文件
+        if self._reader_linked_search.get():
+            self._reader_linked_search_all(clicked_word, source_slot=1)
+        # 匹配页码列：更新命中页面（不弹窗）
+        self._reader_search_and_show(clicked_word)
+
 
     def _reader_show_minimal_popup(self, word, occurrences, slot=1):
         """简略弹窗：仅文字列表显示命中页码与次数，不渲染缩略图。
@@ -11760,6 +11892,746 @@ class ExcelPdfSync(tk.Tk):
 
 
 
+
+    def _everything_quick_filter(self, ext_label):
+        """点击常用格式快捷按钮（.epub/.pdf/.ppt）：填入ext:语法并直接执行搜索。"""
+        ext = ext_label.lstrip(".")
+        self._everything_query.set(f"ext:{ext}")
+        self._everything_search()
+
+    def _everything_search(self):
+        """调用 Everything SDK 搜索文件，将结果填入文件列表。"""
+        query = self._everything_query.get().strip()
+        if not query:
+            return
+        self._record_search_history("everything", query)
+
+        if not EverythingSearch.is_available():
+            messagebox.showwarning("Everything 未就绪",
+                "未找到 Everything SDK (Everything64.dll)。\n"
+                "请确认 Everything 已安装。")
+            self._everything_info.set("Everything 未就绪")
+            return
+
+        self._everything_info.set("正在搜索...")
+        self.update_idletasks()
+
+        # 清空本地过滤，避免干扰搜索结果
+        self._reader_filter.set("")
+
+        SUPPORTED_EXTS = READER_SUPPORTED_EXTS
+        search_query = query
+        if "ext:" not in query.lower() and "file:" not in query.lower():
+            exts = "|".join(ext.lstrip(".") for ext in SUPPORTED_EXTS)
+            search_query = f"{query} ext:{exts}"
+
+        results = EverythingSearch.search(search_query, max_results=2000)
+
+        # 存储为与本地扫描相同的格式 [(full_path, rel_name), ...]
+        # 只保留实际存在的支持的文件
+        self._reader_pdf_files = []
+        for path, name in results:
+            if os.path.isfile(path) and any(path.lower().endswith(ext) for ext in SUPPORTED_EXTS):
+                self._reader_pdf_files.append((path, name))
+        self._reader_pdf_files_all = list(self._reader_pdf_files)
+
+        self._everything_info.set(f"Everything: {len(self._reader_pdf_files)} 个文件")
+        self._reader_info.set(f"搜索: {query}")
+        self._reader_sort_files()
+
+        # 自动选中第一项并预览
+        if self._reader_pdf_files:
+            self._reader_lb.selection_set(0)
+            self._on_reader_select()
+
+    def _everything_clear(self):
+        """清除 Everything 搜索，恢复本地文件夹浏览。"""
+        self._everything_query.set("")
+        self._everything_info.set("Everything 就绪")
+        self._reader_filter.set("")  # 清空本地过滤
+        self._reader_scan()  # 恢复本地扫描结果
+        if self._reader_pdf_files:
+            self._reader_info.set(f"{len(self._reader_pdf_files)} 个文件")
+        else:
+            self._reader_info.set("0 个文件")
+        self._refresh_reader_list()
+
+    def _bind_search_history(self, entry, key, apply_cb):
+        """给搜索框绑定历史下拉：点击(ButtonRelease)或按↓弹出。
+
+        用 ButtonRelease 而非 FocusIn：选中记录后焦点回弹到 Entry 且保持聚焦，
+        FocusIn 不会再触发（导致「再点不弹」）；ButtonRelease 每次点击都触发，
+        且晚于 bind_all 的 <Button-1> 全局关闭，不会刚弹出就被关掉。
+        """
+        entry.bind(
+            "<ButtonRelease-1>",
+            lambda e: self._show_search_history(entry, key, apply_cb))
+        entry.bind(
+            "<Down>",
+            lambda e: self._show_search_history(entry, key, apply_cb))
+
+    def _record_search_history(self, key, keyword):
+        """记录一次搜索，关键词次数 +1（用于左侧搜索栏历史）。"""
+        keyword = (keyword or "").strip()
+        if not keyword:
+            return
+        hist = self._search_histories.setdefault(key, {})
+        hist[keyword] = hist.get(keyword, 0) + 1
+        # 即时持久化：搜索历史需跨重启保留；搜索是低频动作，全量保存开销可忽略
+        try:
+            self._save_config()
+        except Exception:
+            pass
+
+    def _show_search_history(self, entry, key, apply_cb):
+        """在搜索框下方弹出历史下拉，按搜索次数降序。"""
+        hist = self._search_histories.get(key, {})
+        if not hist:
+            return
+        self._hide_search_history()
+        items = sorted(hist.items(), key=lambda kv: (-kv[1], kv[0]))
+        items = items[:self._search_history_max]
+        win = tk.Toplevel(self)
+        win.overrideredirect(True)
+        try:
+            win.attributes("-topmost", True)
+        except Exception:
+            pass
+        w = max(entry.winfo_width(), 200)
+        h = min(240, 26 * len(items) + 6)
+        x = entry.winfo_rootx()
+        y = entry.winfo_rooty() + entry.winfo_height()
+        win.geometry(f"{w}x{h}+{x}+{y}")
+        lb = tk.Listbox(win, bg=CARD, fg=TEXT, selectbackground=ACCENT,
+                        selectforeground="white", relief=tk.SOLID, bd=1,
+                        font=("Microsoft YaHei UI", 9), highlightthickness=0,
+                        activestyle="none")
+        lb.pack(fill=tk.BOTH, expand=True)
+        self._search_history_items = []
+        for kw, cnt in items:
+            lb.insert(tk.END, f"{kw}   ({cnt}次)")
+            self._search_history_items.append(kw)
+        self._search_history_win = win
+        self._search_history_lb = lb
+        self._search_history_apply = apply_cb
+
+        def _pick(event):
+            idx = lb.nearest(event.y)
+            if 0 <= idx < len(self._search_history_items):
+                kw = self._search_history_items[idx]
+                self._hide_search_history()
+                apply_cb(kw)
+
+        lb.bind("<Button-1>", _pick)
+        lb.bind("<Escape>", lambda e: self._hide_search_history())
+
+    def _hide_search_history(self):
+        """关闭搜索历史下拉。"""
+        win = getattr(self, "_search_history_win", None)
+        if win is not None and win.winfo_exists():
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        self._search_history_win = None
+        self._search_history_lb = None
+
+    def _on_global_click(self, event):
+        """全局点击：关闭搜索历史下拉（点击落在下拉内部则忽略）。"""
+        win = getattr(self, "_search_history_win", None)
+        if win is None or not win.winfo_exists():
+            return
+        try:
+            w = event.widget
+            if w is not None and str(w).startswith(str(win)):
+                return
+        except Exception:
+            pass
+        self._hide_search_history()
+
+    def _show_reader_dual_menu(self):
+        """显示第二、第三PDF阅读会话的打开选项。"""
+        menu = tk.Menu(
+            self, tearoff=0, bg=PANEL, fg=TEXT,
+            activebackground=ACCENT, activeforeground="white",
+            font=("Microsoft YaHei UI", 9))
+        for slot in (2, 3, 4):
+            menu.add_command(
+                label=f"阅读区 {slot}：打开当前文件",
+                command=lambda s=slot: self._reader_dual_open_same(s))
+            menu.add_command(
+                label=f"阅读区 {slot}：打开列表选中文件",
+                command=lambda s=slot: self._reader_dual_open_selected(s))
+            menu.add_command(
+                label=f"阅读区 {slot}：选择文件...",
+                command=lambda s=slot: self._reader_dual_choose_file(s))
+            if self._reader_aux.get(slot, {}).get("visible"):
+                menu.add_command(
+                    label=f"关闭 阅读区 {slot}",
+                    command=lambda s=slot: self._reader_aux_close(s))
+            if slot == 3:
+                menu.add_separator()
+        x = self._reader_dual_btn.winfo_rootx()
+        y = self._reader_dual_btn.winfo_rooty() + self._reader_dual_btn.winfo_height()
+        menu.post(x, y)
+
+    def _reader_dual_open_same(self, slot=2):
+        """复制当前主阅读区的文件到指定阅读区（支持所有文件类型）。"""
+        if not self._reader_active_file_path:
+            messagebox.showinfo("双开阅读", "请先在主阅读区打开一份文件")
+            return
+        self._reader_dual_open_path(self._reader_active_file_path, slot)
+
+    def _reader_dual_choose_file(self, slot=2):
+        """手动选择一份文件在指定阅读区打开（支持所有支持的文件格式）。"""
+        path = filedialog.askopenfilename(
+            title=f"选择 PDF {slot} 文件",
+            filetypes=[("支持的文件", "*.pdf;*.epub;*.ppt;*.pptx;*.png;*.jpg;*.jpeg;*.bmp;*.gif"),
+                       ("PDF文件", "*.pdf"), ("所有文件", "*.*")])
+        if path:
+            self._reader_dual_open_path(path, slot)
+
+    def _reader_dual_close(self):
+        self._reader_aux_close(2)
+
+    def _show_app_theme_menu(self):
+        """显示程序全局外观主题菜单。"""
+        palette = self._active_app_palette
+        menu = tk.Menu(
+            self, tearoff=0, bg=palette["PANEL"], fg=palette["TEXT"],
+            activebackground=palette["ACCENT"], activeforeground="white",
+            selectcolor=palette["CARD"], font=("Microsoft YaHei UI", 9))
+        xiaomi_keys = set(getattr(self, "_xiaomi_theme_keys", ()))
+        sep_added = False
+        for key, theme in self._app_themes.items():
+            if key in xiaomi_keys and not sep_added:
+                menu.add_separator()
+                menu.add_command(label="—— 小米汽车色 ——", state="disabled")
+                sep_added = True
+            menu.add_radiobutton(
+                label=theme["name"], variable=self._app_theme, value=key,
+                command=self._apply_app_theme)
+        x = self._app_theme_btn.winfo_rootx()
+        y = self._app_theme_btn.winfo_rooty() + self._app_theme_btn.winfo_height()
+        menu.post(x, y)
+
+    @staticmethod
+    def _derive_secondary_colors(palette):
+        """根据主题明暗派生弹窗/浮层二级色（硬编码中性色的浅/深两套）。"""
+        try:
+            r, g, b = _hex_to_rgb(palette["BG"])
+            dark = (0.299 * r + 0.587 * g + 0.114 * b) < 128
+        except Exception:
+            dark = True
+        if dark:
+            return {"POPUP_BG": "#1a1a1a", "POPUP_CARD": "#2d2d2d",
+                    "POPUP_DIM": "#999999"}
+        return {"POPUP_BG": "#f5f5f5", "POPUP_CARD": "#ffffff",
+                "POPUP_DIM": "#666666"}
+
+    def _apply_app_theme(self, persist=True):
+        """动态更新经典Tk控件与ttk控件的全局配色。"""
+        theme_key = self._app_theme.get()
+        if theme_key not in self._app_themes:
+            theme_key = "graphite"
+            self._app_theme.set(theme_key)
+        old = self._active_app_palette
+        new = self._app_themes[theme_key]
+        color_map = {
+            str(old[key]).lower(): new[key]
+            for key in ("BG", "PANEL", "CARD", "ENTRY", "BORDER",
+                        "ACCENT", "GREEN", "TEXT", "DIM", "CANVAS")
+        }
+
+        def recolor(widget):
+            if isinstance(widget, (RoundedButton, SlimScrollbar)):
+                widget._refresh_theme(color_map, new)
+                return
+            try:
+                keys = set(widget.keys())
+            except Exception:
+                keys = set()
+            updates = {}
+            for option in (
+                    "background", "foreground", "activebackground",
+                    "activeforeground", "selectcolor", "insertbackground",
+                    "highlightbackground", "highlightcolor", "troughcolor"):
+                if option not in keys:
+                    continue
+                try:
+                    current = str(widget.cget(option)).lower()
+                except Exception:
+                    continue
+                if current in color_map:
+                    updates[option] = color_map[current]
+            if updates:
+                try:
+                    widget.configure(**updates)
+                except Exception:
+                    pass
+            try:
+                children = widget.winfo_children()
+            except Exception:
+                children = ()
+            for child in children:
+                recolor(child)
+
+        recolor(self)
+        globals().update({key: new[key] for key in (
+            "BG", "PANEL", "CARD", "ENTRY", "BORDER",
+            "ACCENT", "GREEN", "TEXT", "DIM", "CANVAS")})
+        # 派生二级色随主题明暗切换（弹窗背景等硬编码中性色跟随主题）
+        globals().update(self._derive_secondary_colors(new))
+        self._active_app_palette = dict(new)
+        self._reader_themes["normal"]["canvas_bg"] = new["CANVAS"]
+        self.configure(bg=new["BG"])
+        self._app_theme_btn.config(
+            text=f"✦ {new['name']}", bg=new["ENTRY"], fg=new["TEXT"])
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TNotebook", background=new["BG"], borderwidth=0)
+        style.configure("TEntry", borderwidth=0, relief="flat")
+        style.configure("TCombobox", borderwidth=0)
+        style.configure(
+            "TNotebook.Tab", background=new["PANEL"], foreground=new["TEXT"],
+            padding=(12, 6))
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", new["ACCENT"])],
+            foreground=[("selected", "white")])
+        style.configure(
+            "Treeview", background=new["CARD"], foreground=new["TEXT"],
+            fieldbackground=new["CARD"], borderwidth=0)
+        style.configure(
+            "Treeview.Heading", background=new["PANEL"], foreground=new["TEXT"])
+        style.map("Treeview", background=[("selected", new["ACCENT"])])
+        style.configure(
+            "TScrollbar", background=new["PANEL"], troughcolor=new["BG"],
+            arrowcolor=new["TEXT"])
+        style.configure(
+            "TCombobox", fieldbackground=new["ENTRY"], background=new["ENTRY"],
+            foreground=new["TEXT"])
+        if persist and hasattr(self, "_config_file"):
+            self._save_config()
+
+    def _toggle_reader_linked_search(self):
+        """切换联动搜索开关：ON/OFF"""
+        new_val = not self._reader_linked_search.get()
+        self._reader_linked_search.set(new_val)
+        colors = {True: GREEN, False: "#454b63"}
+        labels = {True: "🔗 联动搜索:开", False: "🔗 联动搜索:关"}
+        self._reader_linked_btn.config(text=labels[new_val], bg=colors[new_val])
+        self._save_config()
+
+    def _reader_update_source_slot(self, slot, word, result):
+        """更新触发搜索的源 slot 的 UI（高亮 + 匹配面板）。"""
+        if not result:
+            return
+
+        if slot == 1:
+            if result["type"] == "pdf" and self._reader_pdf:
+                self._reader_highlight_keywords = [word]
+                self._reader_highlight_exact = True
+                self._reader_preview_search.set(word)
+                occurrences = result["matches"]
+                matched_pages = sorted({p for p, _ in occurrences})
+                self._reader_match_pages = matched_pages
+                self._reader_match_counts = {}
+                for p, _ in occurrences:
+                    self._reader_match_counts[p] = self._reader_match_counts.get(p, 0) + 1
+                self._reader_match_lb.delete(0, tk.END)
+                for p in matched_pages:
+                    self._reader_match_lb.insert(tk.END, f"  {p + 1}")
+                self._reader_match_count_var.set(
+                    self._fmt_match_count(len(matched_pages), len(occurrences)))
+                self._reader_refresh_main_match_flow()
+                self._reader_redraw_highlight_overlay()
+                self._reader_update_active_page_info()
+                self._reader_highlight_thumb()
+            elif result["type"] in ("epub", "html", "text"):
+                text_widget = self._reader_get_text_widget_for_slot(1)
+                if text_widget:
+                    count = self._reader_highlight_in_text_widget(text_widget, word)
+                    self._reader_preview_search.set(word)
+                    self._reader_highlight_keywords = [word]
+                    self._reader_match_count_var.set(self._fmt_match_count(0, count))
+        else:
+            state = self._reader_aux.get(slot)
+            if not state:
+                return
+            state["keywords"] = [word]
+            state["exact"] = True
+            state["search_var"].set(word)
+            if result["type"] == "pdf":
+                occurrences = result["matches"]
+                pages = sorted({p for p, _ in occurrences})
+                counts = {}
+                for p, _ in occurrences:
+                    counts[p] = counts.get(p, 0) + 1
+                state["match_pages"] = pages
+                state["match_counts"] = counts
+                state["match_lb"].delete(0, tk.END)
+                for p in pages:
+                    state["match_lb"].insert(tk.END, f"第{p + 1}页  {counts[p]}处")
+                state["match_count_var"].set(self._fmt_match_count(len(pages), len(occurrences)))
+                self._reader_refresh_aux_match_flow(slot)
+                self._reader_aux_redraw_highlight_overlay(slot)
+            elif result["type"] in ("epub", "html", "text"):
+                text_widget = self._reader_get_text_widget_for_slot(slot)
+                if text_widget:
+                    count = self._reader_highlight_in_text_widget(text_widget, word)
+                    state["match_count_var"].set(self._fmt_match_count(0, count))
+
+    def _reader_update_other_slot_highlight(self, slot, word, result, exact=True):
+        """更新其他 slot 的高亮并触发重渲染，使关键词高亮在画布上可见。
+
+        exact=False 用于预览搜索栏的模糊子串传播——让 PDF2/3 的高亮和 PDF1 的
+        子串高亮保持一致（点击文本的联动搜索仍走 exact=True 整词匹配）。
+        """
+        if not result:
+            return
+
+        if slot == 1:
+            if result["type"] == "pdf" and self._reader_pdf:
+                self._reader_highlight_keywords = [word]
+                self._reader_highlight_exact = exact
+                self._reader_preview_search.set(word)
+                occurrences = result["matches"]
+                matched_pages = sorted({p for p, _ in occurrences})
+                self._reader_match_pages = matched_pages
+                self._reader_match_counts = {}
+                for p, _ in occurrences:
+                    self._reader_match_counts[p] = self._reader_match_counts.get(p, 0) + 1
+                self._reader_match_lb.delete(0, tk.END)
+                for p in matched_pages:
+                    self._reader_match_lb.insert(tk.END, f"  {p + 1}")
+                self._reader_match_count_var.set(
+                    self._fmt_match_count(len(matched_pages), len(occurrences)))
+                self._reader_refresh_main_match_flow()
+                # 触发重渲染使关键词高亮可见
+                self._reader_redraw_highlight_overlay()
+                self._reader_update_active_page_info()
+                self._reader_highlight_thumb()
+            elif result["type"] in ("epub", "html", "text"):
+                text_widget = self._reader_get_text_widget_for_slot(1)
+                if text_widget:
+                    count = self._reader_highlight_in_text_widget(text_widget, word)
+                    self._reader_highlight_keywords = [word]
+                    self._reader_preview_search.set(word)
+                    self._reader_match_count_var.set(self._fmt_match_count(0, count))
+        else:
+            state = self._reader_aux.get(slot)
+            if not state:
+                return
+            state["keywords"] = [word]
+            state["exact"] = exact
+            state["search_var"].set(word)
+            if result["type"] == "pdf":
+                occurrences = result["matches"]
+                pages = sorted({p for p, _ in occurrences})
+                counts = {}
+                for p, _ in occurrences:
+                    counts[p] = counts.get(p, 0) + 1
+                state["match_pages"] = pages
+                state["match_counts"] = counts
+                state["match_lb"].delete(0, tk.END)
+                for p in pages:
+                    state["match_lb"].insert(tk.END, f"第{p + 1}页  {counts[p]}处")
+                state["match_count_var"].set(self._fmt_match_count(len(pages), len(occurrences)))
+                self._reader_refresh_aux_match_flow(slot)
+                # 触发重渲染使关键词高亮在画布上可见
+                self._reader_aux_redraw_highlight_overlay(slot)
+            elif result["type"] in ("epub", "html", "text"):
+                text_widget = self._reader_get_text_widget_for_slot(slot)
+                if text_widget:
+                    count = self._reader_highlight_in_text_widget(text_widget, word)
+                    state["match_count_var"].set(self._fmt_match_count(0, count))
+
+    def _reader_linked_search_all(self, word, source_slot=1, quiet=False):
+        """联动搜索：在全部已打开的阅读区中搜索关键词，展示统一结果。
+
+        quiet=True 时（如 IPC 后台触发）找不到匹配只静默返回，不弹窗打断用户。
+        """
+        results = {}  # {slot: {"type": ..., "path": ..., "matches": ...}}
+
+        # 遍历 3 个 slot，分别搜索
+        for slot in (1, 2, 3, 4):
+            path, file_type, matches = self._reader_search_in_slot(slot, word)
+            if path and matches is not None:
+                results[slot] = {
+                    "type": file_type,
+                    "path": path,
+                    "matches": matches,
+                }
+
+        if not results:
+            if not quiet:
+                messagebox.showinfo("联动搜索", f"所有已打开文件中未找到: \"{word}\"")
+            return
+
+        # 更新源 slot 的高亮和匹配面板
+        self._reader_update_source_slot(source_slot, word, results.get(source_slot))
+
+        # 更新其他 slot 的高亮
+        for slot in results:
+            if slot != source_slot:
+                self._reader_update_other_slot_highlight(slot, word, results[slot])
+
+    def _reader_show_linked_results(self, word, results, source_slot):
+        """弹窗展示联动搜索结果（所有 slot 的命中汇总）。"""
+        win = tk.Toplevel(self)
+        win.title(f"🔗 联动搜索: \"{word}\"")
+        win.configure(bg=BG)
+        # 使用较宽的窗口以便查看结果
+        win_w = min(720, self.winfo_screenwidth() - 100)
+        win_h = min(560, self.winfo_screenheight() - 100)
+        win.geometry(f"{win_w}x{win_h}"
+                     f"+{max(0, self.winfo_rootx() + 60)}+{max(0, self.winfo_rooty() + 50)}")
+        win.minsize(400, 300)
+
+        # 标题
+        header = tk.Frame(win, bg=PANEL)
+        header.pack(fill=tk.X)
+        tk.Label(header, text=f"联动搜索: \"{word}\" — 共 {len(results)} 个文件有匹配",
+                 bg=PANEL, fg=TEXT, anchor="w", padx=12, pady=9,
+                 font=("Microsoft YaHei UI", 10, "bold")).pack(
+                     side=tk.LEFT, fill=tk.X, expand=True)
+        RoundedButton(header, text="✕", bg="#454b63", fg="white",
+                  relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
+                  padx=6, cursor="hand2",
+                  command=win.destroy).pack(side=tk.RIGHT, padx=10, pady=7)
+
+        # 结果列表（可滚动的 frame）
+        cv = tk.Canvas(win, bg=BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(win, command=cv.yview)
+        result_frame = tk.Frame(cv, bg=BG)
+        result_frame.bind("<Configure>", lambda e: cv.configure(
+            scrollregion=cv.bbox("all")))
+        cv.create_window((0, 0), window=result_frame, anchor="nw")
+        cv.config(yscrollcommand=scrollbar.set)
+        cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6, pady=6)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 鼠标滚轮在 result_frame 上也滚动
+        def _wheel(event):
+            cv.yview_scroll(int(-event.delta / 120), "units")
+        cv.bind("<MouseWheel>", _wheel)
+        result_frame.bind("<MouseWheel>", _wheel)
+
+        for slot in (1, 2, 3, 4):
+            r = results.get(slot)
+            if not r:
+                continue
+            display_name = os.path.basename(r["path"])
+            typ = r["type"]
+            matches = r["matches"]
+
+            # 每个 slot 一个卡片
+            card = tk.Frame(result_frame, bg=CARD, highlightbackground=BORDER,
+                            highlightthickness=1)
+            card.pack(fill=tk.X, padx=4, pady=3)
+
+            # 标题行
+            title_row = tk.Frame(card, bg=CARD)
+            title_row.pack(fill=tk.X, padx=8, pady=(6, 2))
+            slot_label = {1: "📄 PDF1", 2: "📄 PDF2", 3: "📄 PDF3", 4: "📄 PDF4"}[slot]
+            is_source = " ← 来源" if slot == source_slot else ""
+            tk.Label(title_row, text=f"{slot_label}: {display_name}{is_source}",
+                     bg=CARD, fg=ACCENT if slot == source_slot else TEXT,
+                     font=("Microsoft YaHei UI", 9, "bold"), anchor="w").pack(
+                         side=tk.LEFT, fill=tk.X, expand=True)
+
+            # 匹配信息
+            if typ == "pdf":
+                if matches:
+                    pages = sorted({p for p, _ in matches})
+                    count = len(matches)
+                    page_str_list = [str(p + 1) for p in pages[:20]]
+                    page_str = ", ".join(page_str_list)
+                    if len(pages) > 20:
+                        page_str += f" ... 等{len(pages)}页"
+                    info = f"匹配 {count} 处，分布在 {len(pages)} 页: {page_str}"
+                else:
+                    info = "无匹配"
+            elif typ in ("epub", "html", "text", "ppt"):
+                if matches:
+                    count = len(matches)
+                    line_list = [str(ln) for ln in matches[:15]]
+                    line_str = ", ".join(line_list)
+                    if len(matches) > 15:
+                        line_str += f" ... 等{len(matches)}行"
+                    info = f"匹配 {count} 行: {line_str}"
+                else:
+                    info = "无匹配"
+            else:
+                info = f"匹配 {len(matches) if matches else 0} 处"
+
+            info_lbl = tk.Label(card, text=info, bg=CARD, fg=DIM,
+                         font=("Microsoft YaHei UI", 8), anchor="w",
+                         padx=8, pady=(0, 6),
+                         wraplength=win_w - 60, justify=tk.LEFT)
+            info_lbl.pack(fill=tk.X)
+
+            # 跳转按钮（非源 slot + 有匹配）
+            if slot != source_slot and matches:
+                btn_row = tk.Frame(card, bg=CARD)
+                btn_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+                RoundedButton(btn_row, text=f"跳转到 PDF{slot}", bg=ACCENT,
+                          fg="white", relief=tk.FLAT, cursor="hand2",
+                          font=("Microsoft YaHei UI", 8), padx=8,
+                          command=lambda s=slot, r=r: self._reader_linked_jump_to(s, r)).pack(
+                              side=tk.LEFT)
+
+        # 关闭按钮
+        RoundedButton(win, text="关闭", bg="#454b63", fg="white",
+                  relief=tk.FLAT, font=("Microsoft YaHei UI", 9), padx=14, pady=6,
+                  cursor="hand2", command=win.destroy).pack(pady=10)
+
+    def _reader_linked_jump_to(self, slot, result):
+        """从联动搜索结果弹窗跳转到指定 slot 的第一个匹配位置。"""
+        self._reader_set_active_slot(slot)
+        if result["type"] == "pdf":
+            first_page = sorted({p for p, _ in result["matches"]})[0]
+            if slot == 1:
+                self._reader_page = first_page
+                self._reader_scroll_to_page(first_page)
+                self._reader_update_active_page_info()
+                self._reader_highlight_thumb()
+            else:
+                state = self._reader_aux[slot]
+                state["page"] = first_page
+                self._reader_aux_render(slot, fit_width=False, target_page=first_page)
+
+    def _toggle_match_col(self):
+        """折叠/展开三个PDF预览区(PDF1/2/3)下方的匹配页码块（同一按钮统一控制）。"""
+        if self._reader_match_visible:
+            self._reader_match_frame.grid_remove()
+            for slot in (2, 3, 4):
+                st = self._reader_aux.get(slot)
+                if st:
+                    st["match_frame"].grid_remove()
+            self._reader_match_nav_btn.config(bg="#454b63")
+            self._reader_match_visible = False
+        else:
+            self._reader_match_frame.grid()
+            for slot in (2, 3, 4):
+                st = self._reader_aux.get(slot)
+                if st:
+                    st["match_frame"].grid()
+            self._reader_match_nav_btn.config(bg=ACCENT)
+            self._reader_match_visible = True
+
+    def _reader_search_and_show(self, word):
+        """搜索整个PDF中所有包含该词的页面，裁剪并顺序显示"""
+        if not self._reader_pdf:
+            return
+
+        # 尝试使用缓存搜索
+        occurrences = self._reader_search_cached(word)
+        if occurrences is None:
+            # 缓存未就绪，回退到逐页扫描（首次搜索时缓存可能在后台构建中）
+            word_lower = word.lower()
+            occurrences = []
+            for i in range(self._reader_pdf.page_count):
+                for w in self._reader_pdf[i].get_text("words"):
+                    w_clean = self._clean_word(w[4])
+                    if w_clean and w_clean.lower() == word_lower:
+                        occurrences.append((i, fitz.Rect(w[0], w[1], w[2], w[3])))
+        else:
+            # 缓存搜索不需要额外处理
+            pass
+
+        if not occurrences:
+            messagebox.showinfo("搜索结果", f"整个文档未找到: \"{word}\"")
+            return
+
+        # 点击预览文字后，同步高亮PDF内该文字的全部出现位置。
+        self._reader_highlight_keywords = [word]
+        self._reader_highlight_exact = True
+        self._reader_preview_search.set(word)
+        matched_pages = sorted({page_idx for page_idx, _ in occurrences})
+        self._reader_match_pages = matched_pages
+        self._reader_match_counts = {}
+        for page_idx, _ in occurrences:
+            self._reader_match_counts[page_idx] = (
+                self._reader_match_counts.get(page_idx, 0) + 1)
+        self._reader_match_lb.delete(0, tk.END)
+        for page_idx in matched_pages:
+            self._reader_match_lb.insert(tk.END, f"  {page_idx + 1}")
+        self._reader_match_count_var.set(
+            self._fmt_match_count(len(matched_pages), len(occurrences)))
+        self._reader_refresh_main_match_flow()
+        if self._reader_page in matched_pages:
+            selected = matched_pages.index(self._reader_page)
+            self._reader_match_lb.selection_set(selected)
+            self._reader_match_lb.see(selected)
+        self._reader_redraw_highlight_overlay()
+        self._reader_update_active_page_info()
+        self._reader_highlight_thumb()
+
+
+
+
+class EverythingSearch:
+    """封装 Everything 搜索 SDK，支持全局文件索引搜索。"""
+    _dll = None
+
+    @classmethod
+    def _init_dll(cls):
+        if cls._dll is not None:
+            return True
+        candidates = [
+            r"C:\Program Files\Quicker\Everything64.dll",
+            r"C:\Program Files\Everything\Everything64.dll",
+            r"C:\Program Files (x86)\Everything\Everything.dll",
+            r"C:\Program Files\Everything\Everything.dll",
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                try:
+                    cls._dll = ctypes.WinDLL(path)
+                    cls._dll.Everything_SetSearchW.argtypes = [wintypes.LPCWSTR]
+                    cls._dll.Everything_SetSearchW.restype = None
+                    cls._dll.Everything_QueryW.argtypes = [wintypes.BOOL]
+                    cls._dll.Everything_QueryW.restype = wintypes.BOOL
+                    cls._dll.Everything_GetNumResults.argtypes = []
+                    cls._dll.Everything_GetNumResults.restype = wintypes.DWORD
+                    cls._dll.Everything_GetResultFullPathNameW.argtypes = [
+                        wintypes.DWORD, wintypes.LPWSTR, wintypes.DWORD
+                    ]
+                    cls._dll.Everything_GetResultFullPathNameW.restype = wintypes.DWORD
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    @classmethod
+    def search(cls, query: str, max_results: int = 2000) -> list:
+        """
+        搜索文件，返回 [(full_path, filename), ...]。
+        支持多关键词空格分隔（Everything 原生语法）。
+        """
+        if not cls._init_dll():
+            return []
+        if not query or not query.strip():
+            return []
+        cls._dll.Everything_SetSearchW(query.strip())
+        if not cls._dll.Everything_QueryW(True):
+            return []
+        num = cls._dll.Everything_GetNumResults()
+        buf = ctypes.create_unicode_buffer(520)
+        results = []
+        for i in range(min(num, max_results)):
+            cls._dll.Everything_GetResultFullPathNameW(i, buf, 520)
+            path = buf.value
+            if path:
+                results.append((path, os.path.basename(path)))
+        return results
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return cls._init_dll()
 
 if __name__ == "__main__":
     import traceback
