@@ -34,65 +34,6 @@ except ImportError:
 # Everything SDK 封装
 # ════════════════════════════════════════════════════════════════
 
-class EverythingSearch:
-    """封装 Everything 搜索 SDK，支持全局文件索引搜索。"""
-    _dll = None
-
-    @classmethod
-    def _init_dll(cls):
-        if cls._dll is not None:
-            return True
-        candidates = [
-            r"C:\Program Files\Quicker\Everything64.dll",
-            r"C:\Program Files\Everything\Everything64.dll",
-            r"C:\Program Files (x86)\Everything\Everything.dll",
-            r"C:\Program Files\Everything\Everything.dll",
-        ]
-        for path in candidates:
-            if os.path.exists(path):
-                try:
-                    cls._dll = ctypes.WinDLL(path)
-                    cls._dll.Everything_SetSearchW.argtypes = [wintypes.LPCWSTR]
-                    cls._dll.Everything_SetSearchW.restype = None
-                    cls._dll.Everything_QueryW.argtypes = [wintypes.BOOL]
-                    cls._dll.Everything_QueryW.restype = wintypes.BOOL
-                    cls._dll.Everything_GetNumResults.argtypes = []
-                    cls._dll.Everything_GetNumResults.restype = wintypes.DWORD
-                    cls._dll.Everything_GetResultFullPathNameW.argtypes = [
-                        wintypes.DWORD, wintypes.LPWSTR, wintypes.DWORD
-                    ]
-                    cls._dll.Everything_GetResultFullPathNameW.restype = wintypes.DWORD
-                    return True
-                except Exception:
-                    continue
-        return False
-
-    @classmethod
-    def search(cls, query: str, max_results: int = 2000) -> list:
-        """
-        搜索文件，返回 [(full_path, filename), ...]。
-        支持多关键词空格分隔（Everything 原生语法）。
-        """
-        if not cls._init_dll():
-            return []
-        if not query or not query.strip():
-            return []
-        cls._dll.Everything_SetSearchW(query.strip())
-        if not cls._dll.Everything_QueryW(True):
-            return []
-        num = cls._dll.Everything_GetNumResults()
-        buf = ctypes.create_unicode_buffer(520)
-        results = []
-        for i in range(min(num, max_results)):
-            cls._dll.Everything_GetResultFullPathNameW(i, buf, 520)
-            path = buf.value
-            if path:
-                results.append((path, os.path.basename(path)))
-        return results
-
-    @classmethod
-    def is_available(cls) -> bool:
-        return cls._init_dll()
 
 
 # ════════════════════════════════════════════════════════════════
@@ -176,36 +117,16 @@ DIM     = "#8d92ab"
 CANVAS  = "#0a0b12"
 
 # ── 派生二级色（随主题明暗切换的弹窗/浮层背景）──────────
-POPUP_BG    = "#1a1a1a"   # 弹窗背景（词命中弹窗/高清放大窗等）
-POPUP_CARD  = "#2d2d2d"   # 弹窗内卡片背景
-POPUP_DIM   = "#999999"   # 弹窗内次级文字
 
 # ── 语义色（阅读/状态反馈常用色，集中定义便于统一换色）──────────
 HIGHLIGHT   = "#ffc832"   # PDF 文本高亮（搜索命中底色，黄）
 ANNOTATE    = "#ffdc00"   # 手绘标注 / EPUB 链接高亮（黄，比高亮更亮）
-SEARCH_HIT  = "#ff5050"   # 文字控件内搜索命中（红）
 DANGER      = "#ff4d6d"   # 危险/重要/错误（红）
 
-YELLOW_FILL    = (255, 220, 0, 130)   # PDF高亮填充（默认黄色）
-YELLOW_BORDER  = (255, 160, 0, 220)   # PDF高亮边框（默认黄色）
-SEARCH_FILL    = (255, 80, 80, 130)   # PDF搜索高亮填充（红色）
-SEARCH_BORDER  = (255, 40, 40, 220)   # PDF搜索高亮边框（红色）
-XL_COLOR_MATCH = 0x0000FFFF           # 表格高亮色-青色（完全匹配）
-XL_COLOR_PARTIAL = 0x00FFFF00         # 表格高亮色-黄色（部分匹配，有差异）
-XL_COLOR_LEFT  = 0x0000FF00           # 表格高亮色-绿色（仅左表独有）
-XL_COLOR_RIGHT = 0x00FF0000           # 表格高亮色-红色（仅右表独有）
-XL_COLOR_NONE  = -4142                # xlNone，清除填充
 
 # ════════════════════════════════════════════════════════════════
 # 全局快捷键（隐藏/恢复主窗口）相关常量
 # ════════════════════════════════════════════════════════════════
-WM_HOTKEY = 0x0312
-MOD_ALT = 0x0001
-MOD_CONTROL = 0x0002
-MOD_SHIFT = 0x0004
-MOD_WIN = 0x0008
-MOD_NOREPEAT = 0x4000
-GLOBAL_HOTKEY_ID = 1  # 本程序固定使用1号热键ID
 MAGNIFIER_TRANSPARENT_COLOR = "#ff00fe"  # 放大镜悬浮窗的"透明色"，配合-transparentcolor做出圆形效果
 BUTTON_CORNER_RADIUS = 8  # 按钮圆角半径（像素）：在原来方角矩形基础上稍微带一点弧度，
                            # 不是全圆的胶囊形状。改这一个数字就能统一调整全部按钮的弧度大小。
@@ -226,24 +147,9 @@ RADIAL_ACTION_POOL = [
     ("bookmark", "🔖 加书签"),
     ("fit_width", "🔲 适应宽度"),
 ]
-RADIAL_ACTION_LABELS = dict(RADIAL_ACTION_POOL)
 DEFAULT_RADIAL_ACTIONS = [key for key, _ in RADIAL_ACTION_POOL]
 
 
-class _MSG(ctypes.Structure):
-    """
-    Win32 MSG 结构体。ctypes.wintypes 不一定内置这个复合结构体，
-    这里按真实的Win32 MSG布局自己显式定义，避免运行时找不到属性。
-    """
-    _fields_ = [
-        ("hWnd", wintypes.HWND),
-        ("message", wintypes.UINT),
-        ("wParam", wintypes.WPARAM),
-        ("lParam", wintypes.LPARAM),
-        ("time", wintypes.DWORD),
-        ("pt_x", ctypes.c_long),
-        ("pt_y", ctypes.c_long),
-    ]
 
 # 显示器矩形结构体（用于放大镜多屏定位：按「光标所在显示器」clamp，而非主屏尺寸）
 class _MONITOR_POINT(ctypes.Structure):
@@ -280,84 +186,9 @@ CODE_GUTTER_BG = "#1e1e1e"
 CODE_GUTTER_FG = "#6e7681"
 CODE_SELECT_BG = "#264f78"
 
-SYNTAX_COLORS = {
-    "comment":     "#6a9955",
-    "string":      "#ce9178",
-    "number":      "#b5cea8",
-    "keyword":     "#569cd6",
-    "type":        "#4ec9b0",
-    "funcname":    "#dcdcaa",
-    "decorator":   "#c586c0",
-    "preprocessor": "#c586c0",
-    "tag":         "#569cd6",
-    "attrname":    "#9cdcfe",
-    "attrvalue":   "#ce9178",
-    "key":         "#9cdcfe",
-}
 
 # 每种"语言"对应一组 (分组名, 正则, 是否需要MULTILINE) -> 统一拼成一个大正则，按顺序优先匹配
-_PY_KEYWORDS = (r"\b(?:False|None|True|and|as|assert|async|await|break|class|continue|"
-                r"def|del|elif|else|except|finally|for|from|global|if|import|in|is|"
-                r"lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield)\b")
-_C_KEYWORDS = (r"\b(?:auto|break|case|char|const|continue|default|do|double|else|enum|"
-               r"extern|float|for|goto|if|inline|int|long|register|restrict|return|short|"
-               r"signed|sizeof|static|struct|switch|typedef|union|unsigned|void|volatile|"
-               r"while|class|public|private|protected|virtual|friend|template|typename|"
-               r"namespace|using|new|delete|this|true|false|nullptr|bool|try|catch|throw|"
-               r"operator|explicit|override|final|constexpr|noexcept|"
-               r"static_cast|dynamic_cast|const_cast|reinterpret_cast)\b")
-_JS_KEYWORDS = (r"\b(?:break|case|catch|class|const|continue|debugger|default|delete|do|"
-                r"else|export|extends|finally|for|function|if|import|in|instanceof|let|"
-                r"new|return|super|switch|this|throw|try|typeof|var|void|while|with|"
-                r"yield|async|await|true|false|null|undefined|of|interface|type|implements|"
-                r"enum|public|private|protected|readonly)\b")
-_CSS_KEYWORDS = (r"@[A-Za-z-]+")
 
-SYNTAX_RULES = {
-    "python": [
-        ("comment", r"\#[^\n]*"),
-        ("string", r"(?:[fFrRbBuU]{1,2})?(?:'''[\s\S]*?'''|\"\"\"[\s\S]*?\"\"\"|"
-                    r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\")"),
-        ("decorator", r"@[A-Za-z_][A-Za-z0-9_.]*"),
-        ("funcname", r"(?<=\bdef\s)[A-Za-z_]\w*|(?<=\bclass\s)[A-Za-z_]\w*"),
-        ("number", r"\b0[xX][0-9a-fA-F]+\b|\b\d+\.?\d*(?:[eE][+-]?\d+)?[jJ]?\b"),
-        ("keyword", _PY_KEYWORDS),
-    ],
-    "c": [
-        ("comment", r"//[^\n]*|/\*[\s\S]*?\*/"),
-        ("string", r"\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'"),
-        ("preprocessor", r"^[ \t]*\#[^\n]*"),
-        ("keyword", _C_KEYWORDS),
-        ("funcname", r"\b[A-Za-z_]\w*(?=\s*\()"),
-        ("number", r"\b0[xX][0-9a-fA-F]+\b|\b\d+\.?\d*(?:[eE][+-]?\d+)?[fFlLuU]*\b"),
-    ],
-    "html": [
-        ("comment", r"<!--[\s\S]*?-->"),
-        ("attrvalue", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
-        ("tag", r"</?[A-Za-z][A-Za-z0-9:_-]*"),
-        ("attrname", r"\b[A-Za-z_:][\w:-]*(?=\s*=)"),
-    ],
-    "css": [
-        ("comment", r"/\*[\s\S]*?\*/"),
-        ("string", r"\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'"),
-        ("decorator", _CSS_KEYWORDS),
-        ("number", r"\#[0-9a-fA-F]{3,8}\b|\b\d+\.?\d*(?:px|em|rem|%|vh|vw|s|ms)?\b"),
-        ("attrname", r"\b[a-zA-Z-]+(?=\s*:)"),
-    ],
-    "js": [
-        ("comment", r"//[^\n]*|/\*[\s\S]*?\*/"),
-        ("string", r"`[\s\S]*?`|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'"),
-        ("funcname", r"(?<=\bfunction\s)[A-Za-z_]\w*"),
-        ("number", r"\b0[xX][0-9a-fA-F]+\b|\b\d+\.?\d*(?:[eE][+-]?\d+)?\b"),
-        ("keyword", _JS_KEYWORDS),
-    ],
-    "json": [
-        ("key", r"\"(?:[^\"\\]|\\.)*\"(?=\s*:)"),
-        ("string", r"\"(?:[^\"\\]|\\.)*\""),
-        ("number", r"-?\b\d+\.?\d*(?:[eE][+-]?\d+)?\b"),
-        ("keyword", r"\b(?:true|false|null)\b"),
-    ],
-}
 
 # 扩展名 → 语言规则集 的映射；值为 None 表示走代码阅读器但不做语法高亮（仅深色+行号+等宽字体）
 EXT_TO_LANG = {
@@ -385,57 +216,12 @@ OFFICE_EXTS = {".doc", ".docx", ".xls", ".xlsx"}
 READER_SUPPORTED_EXTS = (".pdf",)
 
 
-def parse_columns(col_str: str) -> list[str]:
-    """
-    解析列字符串，支持逗号和连字符范围。
-    'A,C,E-G' → ['A','C','E','F','G']
-    """
-    cols = []
-    for part in re.split(r'[,，\s]+', col_str.strip().upper()):
-        if not part:
-            continue
-        if '-' in part:
-            a, b = (value.strip() for value in part.split('-', 1))
-            if not re.fullmatch(r'[A-Z]+', a) or not re.fullmatch(r'[A-Z]+', b):
-                continue
-            start = col_letter_to_index(a)
-            end = col_letter_to_index(b)
-            if start > 16384 or end > 16384:
-                continue
-            if start > end:
-                start, end = end, start
-            cols.extend(index_to_col_letter(index) for index in range(start, end + 1))
-        elif re.fullmatch(r'[A-Z]+', part) and col_letter_to_index(part) <= 16384:
-            cols.append(part)
-    return list(dict.fromkeys(cols))   # 去重保序
 
 
-def col_letter_to_index(letter: str) -> int:
-    """A→1, B→2, Z→26, AA→27 ..."""
-    idx = 0
-    for ch in letter.upper():
-        idx = idx * 26 + (ord(ch) - ord('A') + 1)
-    return idx
 
 
-def index_to_col_letter(index: int) -> str:
-    """1→A, 26→Z, 27→AA ..."""
-    result = []
-    while index > 0:
-        index, remainder = divmod(index - 1, 26)
-        result.append(chr(ord('A') + remainder))
-    return ''.join(reversed(result))
 
 
-def split_cell_value(val: str) -> list:
-    """
-    将单元格值按多种分隔符拆分为独立关键词，过滤空串。
-    支持空格、逗号、分号、斜杠、换行等分隔符。
-    'R101 R102' → ['R101','R102']
-    'R101,R102/R103' → ['R101','R102','R103']
-    """
-    # 用正则匹配非分隔符的连续字符
-    return [t for t in re.split(r'[\s,;\/\\|]+', val.strip()) if t]
 
 
 def _hex_to_rgb(hex_color):
@@ -462,16 +248,6 @@ def _lighten_color(hex_color, factor=0.18):
     return _rgb_to_hex((r, g, b))
 
 
-def _darken_color(hex_color, factor=0.18):
-    """把颜色往黑色方向混合，用于按钮按下状态。factor越大越暗。"""
-    try:
-        r, g, b = _hex_to_rgb(hex_color)
-    except Exception:
-        return hex_color
-    r = r * (1 - factor)
-    g = g * (1 - factor)
-    b = b * (1 - factor)
-    return _rgb_to_hex((r, g, b))
 
 
 # ── 小米汽车车漆色主题（车漆色 → 深色主题，base 做强调色）──────────
@@ -11986,24 +11762,8 @@ class ExcelPdfSync(tk.Tk):
 
 
 # ── 脚本工坊 Text 表格辅助函数 ──────────────────────────────
-def _sw_wcwidth(s):
-    """粗略计算字符串显示宽度：CJK 字符≈2，ASCII≈1。"""
-    w = 0
-    for ch in s:
-        cp = ord(ch)
-        if cp > 0x2000:  # 宽字符（含中文、全角符号等）
-            w += 2
-        else:
-            w += 1
-    return w
 
 
-def _sw_pad_text(s, width):
-    """按显示宽度右填充空格到目标宽度。"""
-    cur = _sw_wcwidth(s)
-    if cur >= width:
-        return s[:width]
-    return s + " " * (width - cur)
 
 
 if __name__ == "__main__":
