@@ -11766,7 +11766,6 @@ if __name__ == "__main__":
     try:
         app = ExcelPdfSync()
         app.protocol("WM_DELETE_WINDOW", app.on_close)
-        app._quadrant_start_reminder_checker()
         app.mainloop()
     except Exception as _launch_err:
         # 启动失败时弹出错误对话框，不再闪退——把这段错误信息截图发给开发者
