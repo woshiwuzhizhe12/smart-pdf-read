@@ -10687,13 +10687,9 @@ class ExcelPdfSync(tk.Tk):
         self._reader_ctx_menu.add_command(
             label="▥ 在阅读区 2 打开",
             command=lambda: self._reader_dual_open_selected(2))
-        self._reader_ctx_menu.add_command(
-            label="▥ 在阅读区 3 打开",
-            command=lambda: self._reader_dual_open_selected(3))
         self._reader_ctx_menu.add_command(label="✏️ 重命名", command=self._reader_ctx_rename)
         self._reader_ctx_menu.add_command(label="📁 打开文件位置", command=self._reader_ctx_open_folder)
         self._reader_ctx_menu.add_separator()
-        self._reader_ctx_menu.add_command(label="⭐ 添加到常用文件", command=self._reader_ctx_add_favorite)
 
         # ── 右侧：PDF预览（PanedWindow左窗格） ──
         right = tk.Frame(paned, bg=BG)
@@ -10945,7 +10941,6 @@ class ExcelPdfSync(tk.Tk):
                                    bg=PANEL, fg=ACCENT, cursor="hand2",
                                    font=("Microsoft YaHei UI", 7))
         anytxt_hint_lbl.pack(side=tk.LEFT, padx=(4, 0))
-        anytxt_hint_lbl.bind("<Button-1>", lambda e: self._show_anytxt_hits_popup(1))
 
         # ── 主体：目录/标记侧栏 + 实际内容区（画布/文本/代码/网页预览） ──
         body_frame = tk.Frame(canvas_container, bg=CANVAS)
@@ -11060,10 +11055,6 @@ class ExcelPdfSync(tk.Tk):
         self._reader_text_preview.grid(row=0, column=0, sticky="nsew")
         text_vsb.grid(row=0, column=1, sticky="ns")
         # 联动搜索：左键点击取词（add="+" 保留默认行为）
-        self._reader_text_preview.bind(
-            "<Button-1>",
-            lambda e: self._reader_text_click(self._reader_text_preview, e, slot=1),
-            add="+")
 
         # ── 代码预览区域（用于.c/.cpp/.py/.html等代码与结构化文本文件，
         #    VSCode Dark+ 风格：深色背景 + 行号 + 语法高亮，默认隐藏）──
@@ -11144,10 +11135,6 @@ class ExcelPdfSync(tk.Tk):
             "<MouseWheel>",
             lambda e: self._reader_code_text.yview_scroll(int(-1 * (e.delta / 120)), "units"))
         # 联动搜索：左键点击取词
-        self._reader_code_text.bind(
-            "<Button-1>",
-            lambda e: self._reader_text_click(self._reader_code_text, e, slot=1),
-            add="+")
 
         # ── 网页预览区域（仅当检测到 tkinterweb 库时可用，用于HTML文件的
         #    内嵌可视化预览；默认隐藏，由 _reader_toggle_html_preview 控制）──
@@ -11326,7 +11313,6 @@ class ExcelPdfSync(tk.Tk):
         anytxt_hint_lbl = tk.Label(tools, textvariable=search_hint, bg=PANEL, fg=ACCENT,
                                    cursor="hand2", font=("Microsoft YaHei UI", 7))
         anytxt_hint_lbl.pack(side=tk.RIGHT, padx=(4, 0))
-        anytxt_hint_lbl.bind("<Button-1>", lambda e, s=slot: self._show_anytxt_hits_popup(s))
         tk.Label(
             tools, textvariable=search_info, bg=PANEL, fg=DIM,
             font=("Microsoft YaHei UI", 7), width=9).pack(side=tk.RIGHT)
@@ -16494,29 +16480,18 @@ class ExcelPdfSync(tk.Tk):
             return
         self._reader_set_active_slot(slot)
         canvas = state["canvas"]
-
-        # 放大镜方向键锁定后：点击应选中「放大镜正对的文本」而非鼠标光标
-        # 正对的文本，否则会点不中目标（锁定态下两者位置可能已偏离）。
-        pin = self._reader_magnifier_click_target(slot)
-        if pin is not None:
-            page_idx, pdf_x, pdf_y = pin
-        else:
-            canvas_y = canvas.canvasy(event.y)
-            import bisect
-            page_idx = bisect.bisect_right(
-                state["page_yoffsets"], canvas_y) - 1
-            if not 0 <= page_idx < state["doc"].page_count:
-                canvas.scan_mark(event.x, event.y)
-                return
-            page_x = state["page_xoffsets"].get(page_idx, 0)
-            crop_x, crop_y = state.get("page_crop_origins", {}).get(page_idx, (0.0, 0.0))
-            pdf_x = (canvas.canvasx(event.x) - page_x) / state["zoom"] + crop_x
-            pdf_y = (
-                canvas_y - state["page_yoffsets"][page_idx]) / state["zoom"] + crop_y
-
+        canvas_y = canvas.canvasy(event.y)
+        import bisect
+        page_idx = bisect.bisect_right(state["page_yoffsets"], canvas_y) - 1
+        if not 0 <= page_idx < state["doc"].page_count:
+            canvas.scan_mark(event.x, event.y)
+            return
+        page_x = state["page_xoffsets"].get(page_idx, 0)
+        crop_x, crop_y = state.get("page_crop_origins", {}).get(page_idx, (0.0, 0.0))
+        pdf_x = (canvas.canvasx(event.x) - page_x) / state["zoom"] + crop_x
+        pdf_y = (canvas_y - state["page_yoffsets"][page_idx]) / state["zoom"] + crop_y
         state["page"] = page_idx
-        state["page_var"].set(
-            f"{page_idx + 1} / {state['doc'].page_count}")
+        state["page_var"].set(f"{page_idx + 1} / {state['doc'].page_count}")
         self._reader_update_active_page_info()
         clicked_word = None
         words = self._reader_aux_get_words(slot)[page_idx]
@@ -16526,16 +16501,8 @@ class ExcelPdfSync(tk.Tk):
                 break
         if clicked_word:
             self._reader_last_clicked_word = clicked_word
-            # 跨程序发送：点击文字 → 复制到剪贴板 + 发送到勾选的目标实例
-            self._reader_copy_and_send(clicked_word)
-            # 弹窗与联动搜索相互独立：联动搜索开启时不再抑制本地弹窗
-            if self._reader_linked_search.get():
-                self._reader_linked_search_all(clicked_word, source_slot=slot)
-            self._reader_aux_search(
-                slot, clicked_word, exact=True, show_preview=True)
         else:
             canvas.scan_mark(event.x, event.y)
-
     def _reader_capture_merged_geometry(self, win):
         if not win or self._reader_merged_occurrence_window is not win:
             return
@@ -20813,7 +20780,6 @@ class ExcelPdfSync(tk.Tk):
             return state["path"]
         return ""
 
-    def _reader_ctx_add_favorite(self):
         """右键菜单：把右键点击的文件添加到常用文件。"""
         sel = self._reader_lb.curselection()
         if not sel:
@@ -22197,17 +22163,10 @@ class ExcelPdfSync(tk.Tk):
         return ""
 
     def _reader_on_canvas_double(self, slot, event):
-        """双击触控板 → 弹出圆盘菜单（取消待执行的点选搜索）。"""
         self._reader_cancel_pending_click()
-        self._reader_last_clicked_word = self._reader_word_at(slot, event)
-        self._reader_show_radial_menu(slot, event.x_root, event.y_root)
-
     def _reader_on_canvas_right(self, slot, event):
-        """右键 → 弹出圆盘菜单；若落在标注/文本标记上则交给它们自己的右键菜单。"""
         self._reader_cancel_pending_click()
         canvas = self._reader_canvas if slot == 1 else self._reader_aux[slot]["canvas"]
-        # 只有落在「标注/文本标记」这些有自己右键菜单的元素上才跳过；页面图片
-        # 本身也是 canvas 项（tag=page_N），不能因为"有 current 项"就跳过，否则圆盘永远弹不出。
         try:
             current = canvas.find_withtag("current")
             if current:
@@ -22216,11 +22175,6 @@ class ExcelPdfSync(tk.Tk):
                     return
         except Exception:
             pass
-        self._reader_last_clicked_word = self._reader_word_at(slot, event)
-        self._reader_show_radial_menu(slot, event.x_root, event.y_root)
-
-    # ── 圆盘菜单 ──
-
     def _reader_show_radial_menu(self, slot, root_x, root_y):
         """在屏幕坐标 (root_x, root_y) 弹出圆盘菜单：透明窗 + 圆形按钮（无卡片背景）。"""
         actions = self._reader_radial_actions
@@ -22593,61 +22547,37 @@ class ExcelPdfSync(tk.Tk):
         build_lists()
 
     def _on_reader_canvas_click(self, event):
-        """点击预览文字 → 搜索所有页 → 裁剪显示（使用缓存加速）"""
+        """点击预览文字 → 高亮收藏模式时持久高亮该词。"""
         self._reader_set_active_slot(1)
         if not self._reader_pdf:
             self._reader_canvas.scan_mark(event.x, event.y)
             return
-
         zoom = self.PDF_DPI / 72.0 * self._reader_scale
-        PAGE_GAP = 8
-
-        # 放大镜方向键锁定后，放大镜中心（锁定位置）可能已偏离物理鼠标光标。
-        # 此时点击应选中「放大镜正对的文本」而非鼠标光标正对的文本，否则会
-        # 点不中目标。锁定态下直接用锁定位置作为点击坐标。
-        pin = self._reader_magnifier_click_target(1)
-        if pin is not None:
-            target_page, pdf_x, pdf_y = pin
-        else:
-            canvas_x = self._reader_canvas.canvasx(event.x)
-            canvas_y = self._reader_canvas.canvasy(event.y)
-
-            # 使用缓存页面Y偏移 → 二分查找（O(log n)）
-            yoffsets = self._reader_page_yoffsets
-            if not yoffsets:
-                self._reader_canvas.scan_mark(event.x, event.y)
-                return
-
-            import bisect
-            idx = bisect.bisect_right(yoffsets, canvas_y) - 1
-            target_page = idx if 0 <= idx < self._reader_pdf.page_count else None
-
-            if target_page is None:
-                self._reader_canvas.scan_mark(event.x, event.y)
-                return
-
-            # 读取这一页图片在画布上的真实位置（水平居中偏移x_offset），
-            # 这里之前一直没有减去x_offset就直接除以zoom，"适应宽度"模式下
-            # x_offset经常恰好是0所以看不出问题，但手动缩放或者开启"智能
-            # 裁边"之后页面变窄、x_offset不再是0，点击坐标就会算错。
-            bbox = self._reader_canvas.bbox(f"page_{target_page}")
-            x_offset = bbox[0] if bbox else 0
-            crop_x, crop_y = (
-                self._reader_page_crop_origins[target_page]
-                if target_page < len(self._reader_page_crop_origins) else (0.0, 0.0))
-            pdf_x = (canvas_x - x_offset) / zoom + crop_x
-            pdf_y = (canvas_y - yoffsets[target_page]) / zoom + crop_y
-
+        canvas_x = self._reader_canvas.canvasx(event.x)
+        canvas_y = self._reader_canvas.canvasy(event.y)
+        yoffsets = self._reader_page_yoffsets
+        if not yoffsets:
+            self._reader_canvas.scan_mark(event.x, event.y)
+            return
+        import bisect
+        idx = bisect.bisect_right(yoffsets, canvas_y) - 1
+        target_page = idx if 0 <= idx < self._reader_pdf.page_count else None
+        if target_page is None:
+            self._reader_canvas.scan_mark(event.x, event.y)
+            return
+        bbox = self._reader_canvas.bbox(f"page_{target_page}")
+        x_offset = bbox[0] if bbox else 0
+        crop_x, crop_y = (
+            self._reader_page_crop_origins[target_page]
+            if target_page < len(self._reader_page_crop_origins) else (0.0, 0.0))
+        pdf_x = (canvas_x - x_offset) / zoom + crop_x
+        pdf_y = (canvas_y - yoffsets[target_page]) / zoom + crop_y
         self._reader_page = target_page
         self._reader_update_active_page_info()
         self._reader_highlight_thumb()
-
         page = self._reader_pdf[target_page]
-
         clicked_word = None
         clicked_rect = None
-
-        # 优先使用文本缓存（内存快1000倍）
         cache = self._reader_text_cache
         if cache and cache[target_page] is not None:
             for w in cache[target_page]:
@@ -22656,34 +22586,17 @@ class ExcelPdfSync(tk.Tk):
                     clicked_rect = [w[0], w[1], w[2], w[3]]
                     break
         else:
-            # 回退到直接解析
             for w in page.get_text("words"):
                 if w[0] <= pdf_x <= w[2] and w[1] <= pdf_y <= w[3]:
                     clicked_word = self._clean_word(w[4])
                     clicked_rect = [w[0], w[1], w[2], w[3]]
                     break
-
         if not clicked_word or len(clicked_word) < 1:
             self._reader_canvas.scan_mark(event.x, event.y)
             return
-
         self._reader_last_clicked_word = clicked_word
-
-        # 高亮收藏：持久高亮该文字，并把原文文本存入标记索引（供全局标记搜索）
         if self._reader_text_hl_mode and clicked_rect:
             self._reader_save_text_hl(target_page, clicked_rect, clicked_word)
-
-        # 跨程序发送：点击文字 → 复制到剪贴板 + 发送到勾选的目标实例
-        self._reader_copy_and_send(clicked_word)
-
-        # PDF点击只显示文档内命中页；Edge搜索由用户在浏览器中手动输入。
-        # 弹窗与联动搜索相互独立：联动搜索开启时不再抑制本地弹窗。
-        # 联动搜索：如果开启联动搜索，同步搜索所有已打开文件
-        if self._reader_linked_search.get():
-            self._reader_linked_search_all(clicked_word, source_slot=1)
-        # 弹窗：始终按弹窗模式显示本地命中页（独立于联动搜索开关）
-        self._reader_search_and_show(clicked_word)
-
     def _reader_search_and_show(self, word):
         """搜索整个PDF中所有包含该词的页面，裁剪并顺序显示"""
         if not self._reader_pdf:
@@ -24335,7 +24248,6 @@ class ExcelPdfSync(tk.Tk):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _show_anytxt_hits_popup(self, slot):
         """点击「另有 N 文件命中」提示 → 弹出命中文件列表，双击/按钮打开。"""
         hits = self._reader_anytxt_hits.get(slot, [])
         if not hits:
