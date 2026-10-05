@@ -1321,11 +1321,17 @@ class ExcelPdfSync(tk.Tk):
         self._notebook.add(self._tab_excel_search, text="📊 Excel 搜索")
         self._build_excel_search_tab(self._tab_excel_search)
 
+        # === 页签4: 外观 ===
+        self._tab_theme = tk.Frame(self._notebook, bg=BG)
+        self._notebook.add(self._tab_theme, text="🎨 外观")
+        self._build_theme_tab()
+
         # ── 页签文字配色 ──
         tab_colors = {
             self._tab_reader:       "#e0a83e",  # 琥珀金 — 文件阅读
             self._tab_pdf_diff:     "#e0607a",  # 玫红色 — PDF差异对比
             self._tab_excel_search: "#4cc38a",  # 翠绿色 — Excel 搜索
+            self._tab_theme:        "#b87ce0",  # 淡紫色 — 外观
         }
         for tab_widget, color in tab_colors.items():
             try:
@@ -11308,11 +11314,6 @@ class ExcelPdfSync(tk.Tk):
                        bg=PANEL, fg=TEXT, selectcolor=ENTRY,
                        activebackground=PANEL, activeforeground=TEXT,
                        font=("Microsoft YaHei UI", 8)).pack(side=tk.RIGHT, padx=6)
-        self._app_theme_btn = RoundedButton(hdr, text="✦ 外观", bg=ENTRY, fg=TEXT,
-                                            relief=tk.FLAT, font=("Microsoft YaHei UI", 8),
-                                            padx=8, cursor="hand2",
-                                            command=self._show_app_theme_menu)
-        self._app_theme_btn.pack(side=tk.RIGHT, padx=8, pady=6)
 
         # ── 搜索栏 ──
         bar = tk.Frame(parent, bg=PANEL)
@@ -12183,8 +12184,12 @@ class ExcelPdfSync(tk.Tk):
         self._active_app_palette = dict(new)
         self._reader_themes["normal"]["canvas_bg"] = new["CANVAS"]
         self.configure(bg=new["BG"])
-        self._app_theme_btn.config(
-            text=f"✦ {new['name']}", bg=new["ENTRY"], fg=new["TEXT"])
+        # 更新外观页签的主题按钮高亮
+        for k, btn in getattr(self, "_theme_btns", {}).items():
+            if k == theme_key:
+                btn.config(bg=new["ACCENT"], fg="white")
+            else:
+                btn.config(bg=new["ENTRY"], fg=new["TEXT"])
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -12570,6 +12575,55 @@ class ExcelPdfSync(tk.Tk):
 
 
 
+
+    def _build_theme_tab(self):
+        """外观页签：主题卡片网格，点击切换全局配色。"""
+        parent = self._tab_theme
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=0)
+        parent.rowconfigure(1, weight=1)
+
+        hdr = tk.Frame(parent, bg=PANEL, height=36)
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text="🎨 外观主题 — 点击卡片切换全局配色", bg=PANEL, fg=TEXT,
+                 font=("Microsoft YaHei UI", 12, "bold"), padx=12).pack(side=tk.LEFT, pady=6)
+
+        # 可滚动卡片网格
+        canvas = tk.Canvas(parent, bg=BG, highlightthickness=0)
+        canvas.grid(row=1, column=0, sticky="nsew", padx=12, pady=8)
+        vsb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+        vsb.grid(row=1, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=vsb.set)
+        inner = tk.Frame(canvas, bg=BG)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(inner_id, width=e.width))
+
+        xiaomi_keys = set(getattr(self, "_xiaomi_theme_keys", ()))
+        max_cols = 3
+        row = col = 0
+        self._theme_btns = {}
+        for key, theme in self._app_themes.items():
+            if key in xiaomi_keys and col != 0:
+                row += 1
+                col = 0
+            btn = RoundedButton(inner, text=theme["name"], bg=ENTRY, fg=TEXT,
+                                font=("Microsoft YaHei UI", 9, "bold"),
+                                padx=12, pady=8, cursor="hand2",
+                                command=lambda k=key: self._select_theme(k))
+            btn.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+            self._theme_btns[key] = btn
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+        for c in range(max_cols):
+            inner.columnconfigure(c, weight=1)
+
+    def _select_theme(self, key):
+        self._app_theme.set(key)
+        self._apply_app_theme()
 
 class EverythingSearch:
     """封装 Everything 搜索 SDK，支持全局文件索引搜索。"""
