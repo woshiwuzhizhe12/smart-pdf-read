@@ -1299,16 +1299,6 @@ class ExcelPdfSync(tk.Tk):
     # ════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        # ── 顶部工具栏（外观主题切换）──
-        bar = tk.Frame(self, bg=PANEL, height=52)
-        bar.pack(fill=tk.X)
-        bar.pack_propagate(False)
-        self._app_theme_btn = RoundedButton(
-            bar, text="✦ 外观", bg=TEXT,
-            font=("Microsoft YaHei UI", 9, "bold"), padx=9, pady=5,
-            cursor="hand2", command=self._show_app_theme_menu)
-        self._app_theme_btn.pack(side=tk.RIGHT, padx=(4, 8), pady=10)
-
         # ── 主体区（Notebook分页）──
         self._body_frame = tk.Frame(self, bg=BG)
         self._body_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
@@ -2735,7 +2725,7 @@ class ExcelPdfSync(tk.Tk):
         # 常用文件格式快捷筛选
         eq_quick_f = tk.Frame(search_hdr, bg=PANEL)
         eq_quick_f.pack(fill=tk.X, pady=(0, 2))
-        for ext_label in (".epub", ".pdf", ".ppt", ".jpg", ".png"):
+        for ext_label in (".pdf",):
             RoundedButton(
                 eq_quick_f, text=ext_label, bg=ENTRY, fg=TEXT, relief=tk.FLAT,
                 font=("Microsoft YaHei UI", 7), padx=6, cursor="hand2",
@@ -11318,6 +11308,11 @@ class ExcelPdfSync(tk.Tk):
                        bg=PANEL, fg=TEXT, selectcolor=ENTRY,
                        activebackground=PANEL, activeforeground=TEXT,
                        font=("Microsoft YaHei UI", 8)).pack(side=tk.RIGHT, padx=6)
+        self._app_theme_btn = RoundedButton(hdr, text="✦ 外观", bg=ENTRY, fg=TEXT,
+                                            relief=tk.FLAT, font=("Microsoft YaHei UI", 8),
+                                            padx=8, cursor="hand2",
+                                            command=self._show_app_theme_menu)
+        self._app_theme_btn.pack(side=tk.RIGHT, padx=8, pady=6)
 
         # ── 搜索栏 ──
         bar = tk.Frame(parent, bg=PANEL)
