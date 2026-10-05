@@ -382,7 +382,7 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif"}
 # Office 二进制格式（无内置预览，双击用系统默认程序打开）
 OFFICE_EXTS = {".doc", ".docx", ".xls", ".xlsx"}
 # 文件阅读器支持打开的全部扩展名（PDF + 代码/文本类 + Markdown/PPT/EPUB + 图片 + Office）
-READER_SUPPORTED_EXTS = tuple(sorted({".pdf"} | CODE_VIEW_EXTS | TEXT_VIEW_EXTS | IMAGE_EXTS | OFFICE_EXTS))
+READER_SUPPORTED_EXTS = (".pdf",)
 
 
 def parse_columns(col_str: str) -> list[str]:
@@ -1512,30 +1512,7 @@ class ExcelPdfSync(tk.Tk):
         self._diff_auto_align = tk.BooleanVar(value=False)   # 自动对齐开关（按文本/位号消除整体偏移）
         self._diff_align_info = tk.StringVar(value="")        # 自动对齐结果提示
 
-        # ── 多实例联动：跨程序发送（点击文本 → 复制 + 发到其它实例的 Everything 搜索栏）──
-        self._init_ipc_identity()
-        self._cross_send_enabled = tk.BooleanVar(value=False)  # 是否启用跨程序发送
-        self._cross_send_targets = set()   # 目标实例 pid 集合
-        self._reader_search_broadcast_suppressed = False  # IPC 收到文本执行搜索时抑制回环广播
-        self._ipc_last_nonce = None        # 本实例收件箱最近处理的消息 nonce
-        self._ipc_poll_job = None          # 收件箱轮询 after 任务
-
         self._build_ui()
-        # 启动收件箱轮询（延迟 300ms 后首轮，不会阻塞 UI）
-        self._ipc_poll_job = self.after(300, self._ipc_poll)
-
-        # 根窗口 Ctrl 键绑定（全屏弹窗用）
-        self.bind("<KeyPress-Control_L>", lambda e: self._on_ctrl_down())
-        self.bind("<KeyPress-Control_R>", lambda e: self._on_ctrl_down())
-        self.bind("<KeyRelease-Control_L>", lambda e: self._on_ctrl_up())
-        self.bind("<KeyRelease-Control_R>", lambda e: self._on_ctrl_up())
-
-        # 根窗口 Shift 键绑定（卡片放大用）
-        self.bind("<KeyPress-Shift_L>", lambda e: self._on_shift_down())
-        self.bind("<KeyPress-Shift_R>", lambda e: self._on_shift_down())
-        self.bind("<KeyRelease-Shift_L>", lambda e: self._on_shift_up())
-        self.bind("<KeyRelease-Shift_R>", lambda e: self._on_shift_up())
-
         # 阅读窗口最大化状态
         self._reader_maximized = False       # 阅读窗口是否最大化
         self._reader_max_restore_geo = ""    # 最大化前的窗口几何信息
@@ -1545,126 +1522,6 @@ class ExcelPdfSync(tk.Tk):
     # ════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        # ── 顶部工具栏 ──
-        bar = tk.Frame(self, bg=PANEL, height=52)
-        bar.pack(fill=tk.X)
-        bar.pack_propagate(False)
-
-        def tbtn(text, cmd, color=ACCENT):
-            b = RoundedButton(bar, text=text, command=cmd, bg=color,
-                          font=("Microsoft YaHei UI", 9, "bold"),
-                          padx=13, pady=8, cursor="hand2")
-            b.pack(side=tk.LEFT, padx=5, pady=9)
-            return b
-
-        tbtn("📂 打开左PDF", self._open_pdf_left_link, "#7c6cf0")       # 紫罗兰
-        tbtn("📂 打开右PDF", self._open_pdf_right_link, "#4ea8e0")       # 蓝青色
-        tbtn("📊 连接 Excel/WPS", self._connect, "#2dd4a8")              # 青绿色
-        tbtn("🔍 全量扫描", self._batch_scan, "#e0a83e")                # 琥珀金
-        tbtn("⚖️ Excel对比", self._excel_compare_mode, "#b87ce0")       # 淡紫色
-
-        tk.Frame(bar, bg=BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y, pady=10, padx=4)
-
-        tbtn("✖ 清除高亮", self._clear_all, "#e0607a")                   # 玫红（醒目）
-        tbtn("◀", lambda: self._go_page(-1), TEXT)
-        tbtn("▶", lambda: self._go_page(+1), TEXT)
-
-        self._status = tk.StringVar(value="")
-        tk.Label(bar, textvariable=self._status, bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT, padx=12)
-
-        self._tools_btn = RoundedButton(
-            bar, text="🧰 小工具", bg=TEXT,
-            font=("Microsoft YaHei UI", 9, "bold"), padx=9, pady=5,
-            cursor="hand2", command=self._show_tools_menu)
-        self._tools_btn.pack(side=tk.RIGHT, padx=(4, 0), pady=10)
-
-        self._app_theme_btn = RoundedButton(
-            bar, text="✦ 外观", bg=TEXT,
-            font=("Microsoft YaHei UI", 9, "bold"), padx=9, pady=5,
-            cursor="hand2", command=self._show_app_theme_menu)
-        self._app_theme_btn.pack(side=tk.RIGHT, padx=(4, 8), pady=10)
-
-        self._hotkey_btn = RoundedButton(
-            bar, text="⌨ 快捷键", bg=TEXT,
-            font=("Microsoft YaHei UI", 9, "bold"), padx=9, pady=5,
-            cursor="hand2", command=self._show_hotkey_config_dialog)
-        self._hotkey_btn.pack(side=tk.RIGHT, padx=(4, 0), pady=10)
-
-        self._notes_btn = RoundedButton(
-            bar, text="📒 笔记", bg=TEXT,
-            font=("Microsoft YaHei UI", 9, "bold"), padx=9, pady=5,
-            cursor="hand2", command=self._toggle_notes_window)
-        self._notes_btn.pack(side=tk.RIGHT, padx=(4, 0), pady=10)
-
-        # 模式切换（右侧）
-        tk.Label(bar, text="模式:", bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 9)).pack(side=tk.RIGHT, padx=(0, 4))
-        mode_options = [
-            ("follow", "跟随点击"),
-            ("batch", "全量扫描"),
-            ("compare", "Excel对比"),
-        ]
-        for val, lbl in mode_options:
-            tk.Radiobutton(bar, text=lbl, variable=self._mode, value=val,
-                           bg=PANEL, fg=TEXT, selectcolor=CARD,
-                           activebackground=PANEL, activeforeground=TEXT,
-                           font=("Microsoft YaHei UI", 9),
-                           command=self._on_mode_change).pack(side=tk.RIGHT, padx=4)
-
-        # ── 工具栏折叠手柄：始终可见，用来隐藏/显示上面那一整条工具栏，
-        #    腾出更多阅读空间（尤其是"文件阅读"页签里这些按钮大多用不上）；
-        #    同时这一条也是窗口最顶部、永远可见的位置，所以把"激励语"和
-        #    "番茄时钟"也放在这里——原生Windows标题栏没法嵌入Tkinter控件，
-        #    这条细横栏是风险最低、效果一致的替代位置。
-        self._top_bar_frame = bar
-        self._toolbar_handle_frame = tk.Frame(self, bg=PANEL, height=26)
-        self._toolbar_handle_frame.pack(fill=tk.X)
-        self._toolbar_handle_frame.pack_propagate(False)
-
-        self._toolbar_collapse_btn = RoundedButton(
-            self._toolbar_handle_frame, text="▲ 隐藏工具栏", bg=PANEL, fg=DIM,
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 7), bd=0,
-            cursor="hand2", command=self._toggle_top_toolbar)
-        self._toolbar_collapse_btn.pack(side=tk.RIGHT, padx=8)
-
-        # ── 番茄时钟：放在折叠按钮左边 ──
-        pomodoro_box = tk.Frame(self._toolbar_handle_frame, bg=PANEL)
-        pomodoro_box.pack(side=tk.RIGHT, padx=(0, 12))
-        self._pomodoro_canvas = tk.Canvas(
-            pomodoro_box, bg=PANEL, width=92, height=26,
-            highlightthickness=0, bd=0)
-        self._pomodoro_canvas.pack(side=tk.LEFT)
-        self._pomodoro_toggle_btn = RoundedButton(
-            pomodoro_box, text="▶", bg="#454b63", fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 7, "bold"), padx=4, cursor="hand2",
-            command=self._toggle_pomodoro)
-        self._pomodoro_toggle_btn.pack(side=tk.LEFT, padx=2)
-        RoundedButton(
-            pomodoro_box, text="⟲", bg="#454b63", fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 7, "bold"), padx=4, cursor="hand2",
-            command=self._reset_pomodoro).pack(side=tk.LEFT, padx=2)
-        RoundedButton(
-            pomodoro_box, text="⚙", bg="#454b63", fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 7, "bold"), padx=4, cursor="hand2",
-            command=self._show_pomodoro_settings).pack(side=tk.LEFT, padx=2)
-
-        # ── 激励语：靠左，循环滚动显示，点击可编辑 ──
-        self._motivation_canvas = tk.Canvas(
-            self._toolbar_handle_frame, bg=PANEL, height=24,
-            highlightthickness=0, bd=0, cursor="hand2")
-        self._motivation_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
-        self._motivation_canvas.bind("<Button-1>", lambda e: self._edit_motivation_text())
-        self._motivation_text_id = None
-        self._motivation_scroll_x = 0.0
-        self._motivation_scroll_job = None
-        self._motivation_canvas.bind(
-            "<Configure>", lambda e: self._motivation_reset_scroll())
-
-        # 启动时按已加载的设置刷新一次番茄时钟显示
-        self._pomodoro_redraw()
-        self._motivation_reset_scroll()
-
         # ── 主体区（Notebook分页）──
         self._body_frame = tk.Frame(self, bg=BG)
         self._body_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
@@ -1672,75 +1529,25 @@ class ExcelPdfSync(tk.Tk):
         self._notebook = ttk.Notebook(self._body_frame)
         self._notebook.pack(fill=tk.BOTH, expand=True)
 
-        # === 页签1: PDF联动（原功能）===
-        self._tab_pdf = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_pdf, text="📄 PDF联动")
-        self._build_pdf_tab()
-
-        # === 页签2: Excel对比（新功能）===
-        self._tab_compare = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_compare, text="⚖️ Excel对比")
-        self._build_compare_tab()
-
-        # === 页签3: PDF双文件对比 ===
-        self._tab_pdf_cmp = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_pdf_cmp, text="📑 PDF对比")
-        self._build_pdf_compare_tab()
-
-        # === 页签4: PDF阅读 ===
+        # === 页签1: 文件阅读 ===
         self._tab_reader = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(self._tab_reader, text="📂 文件阅读")
         self._build_pdf_reader_tab()
 
-        # === 页签5: PDF差异对比 ===
+        # === 页签2: PDF差异对比 ===
         self._tab_pdf_diff = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(self._tab_pdf_diff, text="🔍 PDF差异对比")
         self._build_pdf_diff_tab()
 
-        # === 页签6: BJYZ（只读笔记浏览 + 内嵌浏览器）===
-        self._tab_bjyz = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_bjyz, text="📋 BJYZ")
-        self._build_bjyz_tab()
-
-        # === 页签7: 四象限任务（独立页签）===
-        self._tab_quadrant = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_quadrant, text="🗂 四象限")
-        self._quadrant_tab_built = False
-
-        # === 页签8: 每日一看（独立页签，四象限右边）===
-        self._tab_daily_view = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_daily_view, text="📌 每日一看")
-        self._daily_view_tab_built = False
-
-        # === 页签9: 脚本工坊（PS脚本管理+联动执行）===
-        self._tab_script_workshop = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_script_workshop, text="🔧 脚本工坊")
-        self._script_workshop_built = False
-
-        # === 页签10: 文本搜索（txt/xlsx/c/cpp/py 关键词全文搜索 + 预览）===
-        self._tab_txt_search = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(self._tab_txt_search, text="🔍 文本搜索")
-        self._txt_search_tab_built = False
-
-        # === 页签11: Excel 内容搜索（xlsx/xls 结构化关键词搜索 + 层级展示）===
+        # === 页签3: Excel 搜索 ===
         self._tab_excel_search = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(self._tab_excel_search, text="📊 Excel 搜索")
-        self._excel_search_tab_built = False
+        self._build_excel_search_tab(self._tab_excel_search)
 
-        self._notebook.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed)
-
-        # ── 页签文字配色（通过底层 Tcl/Tk 调用设置 per-tab foreground）──
+        # ── 页签文字配色 ──
         tab_colors = {
-            self._tab_pdf:      "#7c6cf0",  # 紫罗兰 — PDF联动
-            self._tab_compare:  "#2dd4a8",  # 青绿色 — Excel对比
-            self._tab_pdf_cmp:  "#4ea8e0",  # 蓝青色 — PDF对比
-            self._tab_reader:   "#e0a83e",  # 琥珀金 — 文件阅读
-            self._tab_pdf_diff: "#e0607a",  # 玫红色 — PDF差异对比
-            self._tab_bjyz:     "#b87ce0",  # 淡紫色 — BJYZ
-            self._tab_quadrant: "#6cd47c",  # 翠绿色 — 四象限
-            self._tab_daily_view: "#ff8c42",  # 暖橙色 — 每日一看
-            self._tab_script_workshop: "#5eb8e0",  # 天蓝色 — 脚本工坊
-            self._tab_txt_search: "#e0a83e",  # 琥珀金 — 文本搜索
+            self._tab_reader:       "#e0a83e",  # 琥珀金 — 文件阅读
+            self._tab_pdf_diff:     "#e0607a",  # 玫红色 — PDF差异对比
             self._tab_excel_search: "#4cc38a",  # 翠绿色 — Excel 搜索
         }
         for tab_widget, color in tab_colors.items():
@@ -1752,32 +1559,18 @@ class ExcelPdfSync(tk.Tk):
                 pass
 
         # === 配置持久化 ===
-        self._shortcut_bindings = {}   # 快捷键自定义：id -> [Tk事件序列]，改键后持久化
+        self._shortcut_bindings = {}
         self._config_file = os.path.join(os.path.dirname(__file__), "config.json")
         self._load_config()
-        # 默认选中「文件阅读」页签（需求1.1）
+        # 默认选中「文件阅读」页签
         self.after_idle(lambda: self._notebook.select(self._tab_reader))
 
-        # ═══ 脚本工坊状态 ═══
-        self._sw_scripts_dir = getattr(self, '_sw_scripts_dir_saved', '') or os.path.normpath(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Powershell", "PS脚本仓库"))
-        self._sw_manifests = []        # 已发现的脚本清单列表
-        self._sw_selected_idx = None   # 当前选中的脚本索引
-        self._sw_param_widgets = {}    # {param_name: tk.Widget} 动态参数控件
-        self._sw_results = []          # 最近一次运行结果 [{col: val}, ...]
         # ── 同步已加载的配置到按钮状态 ──
         self._apply_reader_settings_to_ui()
-        self._refresh_favorite_files_list()
         self._reader_refresh_bookmark_list()
-        self._notes_ensure_folder()
-        self._bjyz_refresh_tree()  # 用已加载的 notes_folder 刷新 BJYZ 文件树
 
-        # === 应用内快捷键（翻页/搜索/标记/缩放/切换页签）===
+        # === 应用内快捷键（翻页/缩放/聚焦搜索）===
         self._setup_keyboard_shortcuts()
-
-        # === 启动全局快捷键监听（隐藏/恢复主窗口） ===
-        self._start_global_hotkey_listener()
-
     def _toggle_top_toolbar(self):
         """折叠/展开最上面那条全局工具栏，腾出更多阅读/操作空间。"""
         if self._top_bar_frame.winfo_ismapped():
@@ -7044,8 +6837,6 @@ class ExcelPdfSync(tk.Tk):
         try:
             with open(self._config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._sw_param_defaults = data.get("sw_param_defaults", {})
-            self._sw_scripts_dir_saved = data.get("sw_scripts_dir", "")
             saved_shortcuts = data.get("shortcut_bindings", {})
             if isinstance(saved_shortcuts, dict):
                 for sid, bl in saved_shortcuts.items():
@@ -7054,80 +6845,13 @@ class ExcelPdfSync(tk.Tk):
                         if seqs:
                             self._shortcut_bindings[str(sid)] = seqs
             self._reader_dir = data.get("pdf_folder", "")
-            self._reader_net_save_dir = data.get("net_pdf_save_dir", "")
-            if hasattr(self, "_reader_net_save_dir_var"):
-                self._reader_net_save_dir_var.set(
-                    self._reader_net_save_dir or "(默认目录未设置)")
-            saved_theme = data.get("app_theme", "daylight")
-            if saved_theme in self._app_themes:
-                self._app_theme.set(saved_theme)
-                self.after_idle(lambda: self._apply_app_theme(persist=False))
-            saved_highlight = str(
-                data.get("reader_highlight_color", HIGHLIGHT)).lower()
+            saved_highlight = str(data.get("reader_highlight_color", HIGHLIGHT)).lower()
             if re.fullmatch(r"#[0-9a-f]{6}", saved_highlight):
                 self._reader_highlight_hex.set(saved_highlight)
                 self._reader_highlight_color = tuple(
                     int(saved_highlight[i:i + 2], 16) for i in (1, 3, 5))
-                self._reader_highlight_btn.config(
-                    bg=saved_highlight, fg="#111111")
-            saved_popup_mode = data.get("reader_click_popup_mode", "hidden")
-            if saved_popup_mode in ("full", "minimal", "hidden"):
-                self._reader_click_popup_mode.set(saved_popup_mode)
-            saved_linked = data.get("reader_linked_search", True)
-            self._reader_linked_search.set(saved_linked)
-            saved_merged_pos = data.get("reader_merged_popup_position")
-            if (isinstance(saved_merged_pos, (list, tuple))
-                    and len(saved_merged_pos) == 2):
-                try:
-                    self._reader_merged_occurrence_position = (
-                        int(saved_merged_pos[0]), int(saved_merged_pos[1]))
-                except (TypeError, ValueError):
-                    pass
-            saved_merged_size = data.get("reader_merged_popup_size")
-            if (isinstance(saved_merged_size, (list, tuple))
-                    and len(saved_merged_size) == 2):
-                try:
-                    self._reader_merged_occurrence_size = (
-                        int(saved_merged_size[0]), int(saved_merged_size[1]))
-                except (TypeError, ValueError):
-                    pass
-            ai_config = data.get("reader_ai", {})
-            self._reader_ai_online_enabled.set(
-                bool(ai_config.get("online_enabled", False)))
-            self._reader_ai_base_url.set(
-                str(ai_config.get("base_url", "https://api.openai.com/v1")))
-            self._reader_ai_model.set(
-                str(ai_config.get("model", "gpt-4o-mini")))
-            self._reader_ai_api_key.set(str(ai_config.get("api_key", "")))
-            saved_font_size = int(data.get("code_font_size", 10))
-            if 6 <= saved_font_size <= 32:
-                self._reader_code_font_size.set(saved_font_size)
-                self._reader_apply_code_font_size()
-            saved_combo = str(data.get("hotkey_combo", "Ctrl+Alt+E")).strip()
-            if saved_combo:
-                self._hotkey_combo.set(saved_combo)
-            files = data.get("favorite_files", [])
-            if isinstance(files, list):
-                self._favorite_files = [
-                    {"name": str(f.get("name", "")), "path": str(f.get("path", ""))}
-                    for f in files
-                    if isinstance(f, dict) and f.get("path")
-                ]
-            workspaces = data.get("reader_workspaces", [])
-            if isinstance(workspaces, list):
-                self._reader_workspaces = workspaces
-            folders = data.get("reader_workspace_folders", [])
-            if isinstance(folders, list):
-                self._reader_workspace_folders = [
-                    {"id": str(f.get("id", "")), "name": str(f.get("name", "文件夹")),
-                     "parent_id": f.get("parent_id"), "created_at": float(f.get("created_at", 0) or 0)}
-                    for f in folders if isinstance(f, dict) and f.get("name")
-                ]
-            sort_mode = str(data.get("reader_workspace_sort_mode", "name"))
-            if sort_mode not in ("name", "time", "usage"):
-                sort_mode = "name"
-            self._reader_workspace_sort_mode = sort_mode
-            self._reader_ws_sort_var.set(sort_mode)
+                if hasattr(self, "_reader_highlight_btn"):
+                    self._reader_highlight_btn.config(bg=saved_highlight, fg="#111111")
             open_counts = data.get("reader_open_counts", {})
             if isinstance(open_counts, dict):
                 cleaned_counts = {}
@@ -7139,23 +6863,6 @@ class ExcelPdfSync(tk.Tk):
                     except (TypeError, ValueError):
                         continue
                 self._open_counts = cleaned_counts
-            search_histories = data.get("search_histories", {})
-            if isinstance(search_histories, dict):
-                cleaned_hist = {}
-                for bar_key, inner in search_histories.items():
-                    if not isinstance(inner, dict):
-                        continue
-                    cleaned_inner = {}
-                    for kw, cnt in inner.items():
-                        try:
-                            n = int(cnt)
-                            if n > 0:
-                                cleaned_inner[str(kw)] = n
-                        except (TypeError, ValueError):
-                            continue
-                    if cleaned_inner:
-                        cleaned_hist[str(bar_key)] = cleaned_inner
-                self._search_histories = cleaned_hist
             resume = data.get("reader_resume", {})
             if isinstance(resume, dict):
                 self._reader_resume = {
@@ -7184,158 +6891,6 @@ class ExcelPdfSync(tk.Tk):
                     if valid_items:
                         cleaned[str(path)] = valid_items
                 self._reader_annotations = cleaned
-
-            motivation = data.get("motivation_text", "")
-            if isinstance(motivation, str) and motivation.strip():
-                self._motivation_text.set(motivation)
-            saved_mc = data.get("motivation_color", "")
-            if isinstance(saved_mc, str) and saved_mc.strip():
-                self._motivation_color = saved_mc
-            try:
-                wm = int(data.get("pomodoro_work_minutes", 25))
-                if 1 <= wm <= 180:
-                    self._pomodoro_work_minutes = wm
-            except (TypeError, ValueError):
-                pass
-            try:
-                bm = int(data.get("pomodoro_break_minutes", 5))
-                if 1 <= bm <= 60:
-                    self._pomodoro_break_minutes = bm
-            except (TypeError, ValueError):
-                pass
-            saved_style = data.get("pomodoro_style", "")
-            if saved_style in ("ring", "glow", "pulse", "classic"):
-                self._pomodoro_style = saved_style
-            saved_img = data.get("pomodoro_image_path", "")
-            if isinstance(saved_img, str) and saved_img.strip():
-                if os.path.isfile(saved_img):
-                    self._pomodoro_image_path = saved_img
-            self._pomodoro_remaining = self._pomodoro_work_minutes * 60
-            if hasattr(self, "_pomodoro_canvas"):
-                self._pomodoro_redraw()
-
-            epub_bg = data.get("epub_bg_color", "")
-            if isinstance(epub_bg, str) and re.match(r"^#[0-9a-fA-F]{6}$", epub_bg):
-                self._epub_bg_color = epub_bg
-            try:
-                efs = int(data.get("epub_font_size", 12))
-                if 8 <= efs <= 40:
-                    self._epub_font_size = efs
-            except (TypeError, ValueError):
-                pass
-            epub_font = data.get("epub_font_family", "")
-            if isinstance(epub_font, str) and epub_font.strip():
-                self._epub_font_family = epub_font.strip()
-            try:
-                els = int(data.get("epub_line_spacing", 6))
-                if 0 <= els <= 40:
-                    self._epub_line_spacing = els
-            except (TypeError, ValueError):
-                pass
-
-            epub_marks_raw = data.get("epub_marks", {})
-            if isinstance(epub_marks_raw, dict):
-                cleaned_epub_marks = {}
-                for path, mark_list in epub_marks_raw.items():
-                    if not isinstance(mark_list, list):
-                        continue
-                    valid_marks = []
-                    for it in mark_list:
-                        if not isinstance(it, dict):
-                            continue
-                        try:
-                            chapter = int(it.get("chapter", -1))
-                            start = int(it.get("start", -1))
-                            end = int(it.get("end", -1))
-                        except (TypeError, ValueError):
-                            continue
-                        if chapter >= 0 and start >= 0 and end > start:
-                            valid_marks.append({
-                                "chapter": chapter, "start": start, "end": end,
-                                "color": str(it.get("color", "#ffdc00")),
-                            })
-                    if valid_marks:
-                        cleaned_epub_marks[str(path)] = valid_marks
-                self._epub_marks = cleaned_epub_marks
-
-            quadrant_keys = ("important_urgent", "important_not_urgent",
-                              "not_important_urgent", "not_important_not_urgent")
-            quadrant_raw = data.get("quadrant_tasks", {})
-            if isinstance(quadrant_raw, dict):
-                cleaned_quadrant = {k: [] for k in quadrant_keys}
-                max_seen_id = 0
-                for key in quadrant_keys:
-                    task_list = quadrant_raw.get(key, [])
-                    if not isinstance(task_list, list):
-                        continue
-                    for it in task_list:
-                        if not isinstance(it, dict):
-                            continue
-                        text = it.get("text", "")
-                        if not isinstance(text, str) or not text.strip():
-                            continue
-                        try:
-                            task_id = int(it.get("id", 0))
-                        except (TypeError, ValueError):
-                            continue
-                        done = bool(it.get("done", False))
-                        remind_time = it.get("remind_time", None)
-                        if remind_time is not None and not isinstance(remind_time, str):
-                            remind_time = None
-                        advance_minutes = int(it.get("advance_minutes", 0))
-                        cleaned_quadrant[key].append(
-                            {"id": task_id, "text": text, "done": done,
-                             "remind_time": remind_time, "advance_minutes": advance_minutes})
-                        max_seen_id = max(max_seen_id, task_id)
-                self._quadrant_tasks = cleaned_quadrant
-                try:
-                    saved_next_id = int(data.get("quadrant_next_id", 1))
-                except (TypeError, ValueError):
-                    saved_next_id = 1
-                # 取"保存的下一个ID"和"实际数据里出现过的最大ID+1"两者较大值，
-                # 避免配置文件被手动改坏导致后续新建任务出现ID冲突
-                self._quadrant_next_id = max(saved_next_id, max_seen_id + 1)
-
-            saved_notes_folder = data.get("notes_folder", "")
-            if isinstance(saved_notes_folder, str) and saved_notes_folder.strip():
-                self._notes_folder = saved_notes_folder.strip()
-
-            saved_daily = data.get("daily_view_cells", None)
-            if isinstance(saved_daily, list) and len(saved_daily) == 4:
-                self._daily_view_cells = []
-                for it in saved_daily:
-                    if isinstance(it, dict) and "type" in it:
-                        self._daily_view_cells.append({
-                            "type": it.get("type"),
-                            "path": it.get("path", ""),
-                            "page": int(it.get("page", 0)),
-                            "url": it.get("url", ""),
-                            "label": it.get("label", ""),
-                        })
-                    else:
-                        self._daily_view_cells.append(
-                            {"type": None, "path": "", "page": 0, "url": "", "label": ""})
-            elif isinstance(data.get("daily_view_items"), list):
-                # 兼容旧格式：迁移到新的 cells 格式
-                old_items = data["daily_view_items"]
-                self._daily_view_cells = [
-                    {"type": None, "path": "", "page": 0, "url": "", "label": ""}
-                    for _ in range(4)]
-                for i, it in enumerate(old_items[:4]):
-                    if isinstance(it, dict) and it.get("type") in ("pdf", "image"):
-                        self._daily_view_cells[i] = {
-                            "type": it["type"],
-                            "path": it.get("path", ""),
-                            "page": int(it.get("page", 0)),
-                            "url": "",
-                            "label": it.get("label", ""),
-                        }
-            saved_daily_grid = data.get("daily_view_grid", 1)
-            if isinstance(saved_daily_grid, int) and 1 <= saved_daily_grid <= 4:
-                self._daily_view_grid = saved_daily_grid
-            saved_daily_zooms = data.get("daily_view_zooms", [1.0, 1.0, 1.0, 1.0])
-            if isinstance(saved_daily_zooms, list) and len(saved_daily_zooms) == 4:
-                self._daily_view_zooms = [float(z) for z in saved_daily_zooms]
 
             marks = data.get("reader_page_marks", {})
             if isinstance(marks, dict):
@@ -7424,9 +6979,9 @@ class ExcelPdfSync(tk.Tk):
             saved_reader_theme = data.get("reader_theme", "normal")
             if saved_reader_theme in ("normal", "dark", "green", "sepia", "black_white"):
                 self._reader_theme.set(saved_reader_theme)
-                # 应用阅读器主题（画布背景色）
                 theme_bg = self._reader_themes[saved_reader_theme].get("canvas_bg", CANVAS)
-                self._reader_canvas.config(bg=theme_bg)
+                if hasattr(self, "_reader_canvas"):
+                    self._reader_canvas.config(bg=theme_bg)
             saved_crop = data.get("reader_crop_margins", False)
             if isinstance(saved_crop, bool):
                 self._reader_crop_margins_mode = saved_crop
@@ -7438,7 +6993,7 @@ class ExcelPdfSync(tk.Tk):
                 self._reader_scroll_lines = saved_scroll
                 if hasattr(self, "_reader_speed_combo_var"):
                     self._reader_sync_speed_combo()
-            # 手动框选正文区（每文件归一化正文区，过滤非法项）
+            # 手动框选正文区
             saved_body = data.get("reader_body_crop_regions", {})
             if isinstance(saved_body, dict):
                 self._reader_body_crop_regions = {}
@@ -7448,38 +7003,7 @@ class ExcelPdfSync(tk.Tk):
                             self._reader_body_crop_regions[str(k)] = tuple(float(x) for x in v)
                         except (TypeError, ValueError):
                             pass
-            # 圆盘菜单操作列表（过滤未知 key，空则回退默认）
-            saved_radial = data.get("reader_radial_actions")
-            if isinstance(saved_radial, list):
-                valid_keys = {key for key, _ in RADIAL_ACTION_POOL}
-                self._reader_radial_actions = [a for a in saved_radial if a in valid_keys]
-                if not self._reader_radial_actions:
-                    self._reader_radial_actions = list(DEFAULT_RADIAL_ACTIONS)
-            # 滚轮横滚模式设置
-            _hsc_on = data.get("reader_hscroll_on")
-            if isinstance(_hsc_on, bool):
-                self._reader_hscroll_on = _hsc_on
-            _hsc_vis = data.get("reader_hscroll_visible")
-            if isinstance(_hsc_vis, int):
-                self._reader_hscroll_visible = max(1, min(4, _hsc_vis))
-            _hsc_pin = data.get("reader_hscroll_pin1")
-            if isinstance(_hsc_pin, bool):
-                self._reader_hscroll_pin1 = _hsc_pin
-            self._reader_refresh_hscroll_ui()
-            # 文本搜索页签：保存/搜索路径 + 常用路径
-            _sp = data.get("txt_search_save_path")
-            if isinstance(_sp, str) and _sp:
-                self._txt_search_save_path = _sp
-            _sr = data.get("txt_search_search_path")
-            if isinstance(_sr, str) and _sr:
-                self._txt_search_search_path = _sr
-            _rp = data.get("txt_search_recent_paths")
-            if isinstance(_rp, list):
-                self._txt_search_recent_paths = [p for p in _rp if isinstance(p, str)][:10]
-            _fs = data.get("txt_search_font_size")
-            if isinstance(_fs, int):
-                self._txt_search_font_size.set(_fs)
-            # Excel 搜索页签：搜索路径 + 常用路径 + 递归开关
+            # Excel 搜索页签
             _esr = data.get("excel_search_search_path")
             if isinstance(_esr, str) and _esr:
                 self._excel_search_search_path = _esr
@@ -7490,70 +7014,16 @@ class ExcelPdfSync(tk.Tk):
                 self._excel_search_recursive.set(data["excel_search_recursive"])
         except Exception:
             self._reader_dir = ""
-
     def _save_config(self):
         import json
         try:
-            # 多实例兼容：本实例若没改过工作区/文件夹，则保留磁盘上已有的那份，
-            # 避免「空闲实例在关闭时用空数据覆盖另一实例刚建的工作区/文件夹」。
-            ws_data = self._reader_workspaces
-            folders_data = self._reader_workspace_folders
-            sort_data = self._reader_workspace_sort_mode
-            if not getattr(self, "_reader_ws_dirty", False):
-                try:
-                    if os.path.isfile(self._config_file):
-                        with open(self._config_file, encoding="utf-8") as f:
-                            disk = json.load(f)
-                        if isinstance(disk.get("reader_workspaces"), list):
-                            ws_data = disk["reader_workspaces"]
-                        if isinstance(disk.get("reader_workspace_folders"), list):
-                            folders_data = disk["reader_workspace_folders"]
-                        if disk.get("reader_workspace_sort_mode") in ("name", "time", "usage"):
-                            sort_data = disk["reader_workspace_sort_mode"]
-                except Exception:
-                    pass
-
             with open(self._config_file, "w", encoding="utf-8") as f:
                 json.dump({
-                    "sw_param_defaults": getattr(self, "_sw_param_defaults", {}),
-                    "sw_scripts_dir": getattr(self, "_sw_scripts_dir", ""),
                     "pdf_folder": self._reader_dir,
-                    "net_pdf_save_dir": self._reader_net_save_dir,
-                    "app_theme": self._app_theme.get(),
                     "reader_highlight_color": self._reader_highlight_hex.get(),
-                    "reader_ai": {
-                        "online_enabled": self._reader_ai_online_enabled.get(),
-                        "base_url": self._reader_ai_base_url.get().strip(),
-                        "model": self._reader_ai_model.get().strip(),
-                        "api_key": self._reader_ai_api_key.get().strip(),
-                    },
-                    "code_font_size": self._reader_code_font_size.get(),
-                    "hotkey_combo": self._hotkey_combo.get(),
-                    "favorite_files": self._favorite_files,
-                    "reader_workspaces": ws_data,
-                    "reader_workspace_folders": folders_data,
-                    "reader_workspace_sort_mode": sort_data,
                     "reader_open_counts": self._open_counts,
-                    "search_histories": getattr(self, "_search_histories", {}),
                     "reader_resume": self._reader_resume,
                     "reader_annotations": self._reader_annotations,
-                    "motivation_text": self._motivation_text.get(),
-                    "motivation_color": self._motivation_color,
-                    "pomodoro_work_minutes": self._pomodoro_work_minutes,
-                    "pomodoro_break_minutes": self._pomodoro_break_minutes,
-                    "pomodoro_style": self._pomodoro_style,
-                    "pomodoro_image_path": self._pomodoro_image_path,
-                    "epub_bg_color": self._epub_bg_color,
-                    "epub_font_size": self._epub_font_size,
-                    "epub_font_family": self._epub_font_family,
-                    "epub_line_spacing": self._epub_line_spacing,
-                    "epub_marks": self._epub_marks,
-                    "quadrant_tasks": self._quadrant_tasks,
-                    "quadrant_next_id": self._quadrant_next_id,
-                    "daily_view_cells": self._daily_view_cells,
-                    "daily_view_grid": self._daily_view_grid,
-                    "daily_view_zooms": self._daily_view_zooms,
-                    "notes_folder": self._notes_folder,
                     "reader_page_marks": self._reader_page_marks,
                     "reader_text_marks": self._reader_text_marks,
                     "reader_text_hl": self._reader_text_hl,
@@ -7563,28 +7033,11 @@ class ExcelPdfSync(tk.Tk):
                     "reader_scroll_lines": self._reader_scroll_lines,
                     "reader_body_crop_regions": {
                         k: list(v) for k, v in self._reader_body_crop_regions.items()},
-                    "reader_radial_actions": self._reader_radial_actions,
-                    "reader_hscroll_on": self._reader_hscroll_on,
-                    "reader_hscroll_visible": self._reader_hscroll_visible,
-                    "reader_hscroll_pin1": self._reader_hscroll_pin1,
-                    "txt_search_save_path": self._txt_search_save_path,
-                    "txt_search_search_path": self._txt_search_search_path,
-                    "txt_search_recent_paths": self._txt_search_recent_paths,
-                    "txt_search_font_size": self._txt_search_font_size.get(),
                     "excel_search_search_path": self._excel_search_search_path,
                     "excel_search_recent_paths": self._excel_search_recent_paths,
                     "excel_search_recursive": self._excel_search_recursive.get(),
-                    "reader_click_popup_mode": self._reader_click_popup_mode.get(),
-                    "reader_linked_search": self._reader_linked_search.get(),
-                    "reader_merged_popup_position": (
-                        list(self._reader_merged_occurrence_position)
-                        if self._reader_merged_occurrence_position else None),
-                    "reader_merged_popup_size": (
-                        list(self._reader_merged_occurrence_size)
-                        if self._reader_merged_occurrence_size else None),
                     "shortcut_bindings": getattr(self, "_shortcut_bindings", {}),
                 }, f, indent=2)
-            self._reader_ws_dirty = False  # 已落盘，清除脏标记
         except Exception:
             pass
 
@@ -11156,63 +10609,6 @@ class ExcelPdfSync(tk.Tk):
         self.bind_all("<MouseWheel>", _left_wheel, add="+")
         left = _left_inner   # 后续所有区块都建在内层滚动帧上
 
-        # ── 常用文件（默认收起，只占一行，不挤占其他区域空间）──
-        fav_hdr = tk.Frame(left, bg=PANEL)
-        fav_hdr.pack(fill=tk.X, padx=8, pady=(8, 0))
-        self._favorite_files_hdr_lbl = tk.StringVar(value="⭐ 常用文件 (0)")
-        tk.Label(fav_hdr, textvariable=self._favorite_files_hdr_lbl,
-                 bg=PANEL, fg=TEXT, font=("Microsoft YaHei UI", 9, "bold"),
-                 anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
-        RoundedButton(fav_hdr, text="+ 添加当前", command=self._add_current_file_to_favorites,
-                  bg=GREEN, fg="white", relief=tk.FLAT, cursor="hand2",
-                  font=("Microsoft YaHei UI", 8), padx=5).pack(side=tk.RIGHT)
-
-        # 常用文件搜索：输入关键字实时过滤下拉列表（按名称/路径子串匹配）
-        fav_search_row = tk.Frame(left, bg=PANEL)
-        fav_search_row.pack(fill=tk.X, padx=8, pady=(4, 0))
-        fav_search_entry = tk.Entry(
-            fav_search_row, textvariable=self._favorite_search_var,
-            bg=ENTRY, fg=TEXT, insertbackground=TEXT, relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 9))
-        fav_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=2)
-        fav_search_entry.bind("<KeyRelease>", self._on_favorite_filter_change)
-        fav_search_entry.bind(
-            "<Return>",
-            lambda e: self._record_search_history(
-                "favorite", self._favorite_search_var.get()))
-        self._bind_search_history(
-            fav_search_entry, "favorite",
-            lambda kw: (self._favorite_search_var.set(kw),
-                        self._refresh_favorite_files_list()))
-
-        # 下拉列表：一眼看到全部常用文件，不需要滚动；选中即打开
-        fav_combo_row = tk.Frame(left, bg=PANEL)
-        fav_combo_row.pack(fill=tk.X, padx=8, pady=(4, 0))
-        self._favorite_files_combo_var = tk.StringVar(value="")
-        self._favorite_files_combo = ttk.Combobox(
-            fav_combo_row, textvariable=self._favorite_files_combo_var,
-            state="readonly", font=("Microsoft YaHei UI", 9))
-        self._favorite_files_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self._favorite_files_combo.bind("<<ComboboxSelected>>", self._on_favorite_file_combo_select)
-        self._bind_tooltip(self._favorite_files_combo, self._favorite_tooltip_text)
-        self._favorite_files_combo.bind(
-            "<Button-1>", self._widen_favorite_popdown, add="+")
-        RoundedButton(fav_combo_row, text="🗑 管理", command=self._show_favorite_files_manage_dialog,
-                  bg="#3a3f56", fg="white", relief=tk.FLAT, cursor="hand2",
-                  font=("Microsoft YaHei UI", 8), padx=6).pack(side=tk.LEFT, padx=(4, 0))
-
-        self._favorite_files_ctx_menu = tk.Menu(
-            self, tearoff=0, bg=PANEL, fg=TEXT,
-            activebackground=ACCENT, activeforeground="white",
-            font=("Microsoft YaHei UI", 9))
-        self._favorite_files_ctx_menu.add_command(label="▶ 打开", command=self._open_favorite_file)
-        self._favorite_files_ctx_menu.add_command(
-            label="📁 打开文件位置", command=self._favorite_files_ctx_open_folder)
-        self._favorite_files_ctx_menu.add_command(
-            label="🗑 从常用文件移除", command=self._remove_favorite_file)
-
-        tk.Frame(left, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=(6, 0))
-
         # 文件夹选择
         hdr = tk.Frame(left, bg=PANEL)
         hdr.pack(fill=tk.X, padx=8, pady=(8, 0))
@@ -11227,227 +10623,6 @@ class ExcelPdfSync(tk.Tk):
                  wraplength=260, justify=tk.LEFT).pack(fill=tk.X, pady=2)
 
         tk.Frame(left, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
-
-        # ── Everything 全局搜索 ──
-        search_hdr = tk.Frame(left, bg=PANEL)
-        search_hdr.pack(fill=tk.X, padx=8, pady=(2, 0))
-        tk.Label(search_hdr, text="\U0001f50d Everything 搜索", bg=PANEL, fg=TEXT,
-                 font=("Microsoft YaHei UI", 9, "bold"), anchor="w").pack(fill=tk.X)
-
-        self._everything_query = tk.StringVar(value="")
-        eq_f = tk.Frame(search_hdr, bg=PANEL)
-        eq_f.pack(fill=tk.X, pady=(2, 0))
-        eq_entry = tk.Entry(eq_f, textvariable=self._everything_query,
-                            bg=ENTRY, fg=TEXT, insertbackground=TEXT,
-                            relief=tk.FLAT, font=("Microsoft YaHei UI", 9))
-        eq_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-        self._bind_reader_text_input(eq_entry)
-        eq_entry.bind("<Return>", lambda e: self._everything_search())
-        self._bind_search_history(
-            eq_entry, "everything",
-            lambda kw: (self._everything_query.set(kw), self._everything_search()))
-        RoundedButton(eq_f, text="搜索", bg=ACCENT, fg="white", relief=tk.FLAT,
-                  font=("Microsoft YaHei UI", 8), padx=8, cursor="hand2",
-                  command=self._everything_search).pack(side=tk.RIGHT, padx=(4, 0))
-
-        eq_tip = tk.Label(search_hdr, text="空格分隔多关键词，回车执行搜索",
-                          bg=PANEL, fg=DIM, font=("Microsoft YaHei UI", 7), anchor="w")
-        eq_tip.pack(fill=tk.X, pady=(0, 2))
-
-        # 常用文件格式快捷筛选：点一下直接把"ext:xxx"填进搜索框并立即搜索，
-        # 不用自己记语法、手动敲。
-        eq_quick_f = tk.Frame(search_hdr, bg=PANEL)
-        eq_quick_f.pack(fill=tk.X, pady=(0, 2))
-        for ext_label in (".epub", ".pdf", ".ppt", ".jpg", ".png"):
-            RoundedButton(
-                eq_quick_f, text=ext_label, bg=ENTRY, fg=TEXT, relief=tk.FLAT,
-                font=("Microsoft YaHei UI", 7), padx=6, cursor="hand2",
-                command=lambda e=ext_label: self._everything_quick_filter(e)
-            ).pack(side=tk.LEFT, padx=(0, 4))
-
-        # Everything 搜索状态 + 清除按钮
-        eq_status_f = tk.Frame(left, bg=PANEL)
-        eq_status_f.pack(fill=tk.X, padx=8, pady=(0, 2))
-        self._everything_info = tk.StringVar(value="Everything 就绪")
-        tk.Label(eq_status_f, textvariable=self._everything_info, bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 8), anchor="w").pack(side=tk.LEFT)
-        RoundedButton(eq_status_f, text="返回文件夹", bg="#454b63", fg="white",
-                  relief=tk.FLAT, font=("Microsoft YaHei UI", 8), padx=6,
-                  cursor="hand2", command=self._everything_clear).pack(side=tk.RIGHT)
-
-        tk.Frame(left, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
-
-        # ── 文件内容搜索 ──
-        content_hdr = tk.Frame(left, bg=PANEL)
-        content_hdr.pack(fill=tk.X, padx=8, pady=(2, 0))
-        tk.Label(content_hdr, text="\U0001f50d 文件内容搜索", bg=PANEL, fg=TEXT,
-                 font=("Microsoft YaHei UI", 9, "bold"), anchor="w").pack(fill=tk.X)
-
-        self._reader_content_query = tk.StringVar(value="")
-        cq_f = tk.Frame(content_hdr, bg=PANEL)
-        cq_f.pack(fill=tk.X, pady=(2, 0))
-        cq_entry = tk.Entry(cq_f, textvariable=self._reader_content_query,
-                            bg=ENTRY, fg=TEXT, insertbackground=TEXT,
-                            relief=tk.FLAT, font=("Microsoft YaHei UI", 9))
-        cq_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-        self._bind_reader_text_input(cq_entry)
-        cq_entry.bind("<Return>", lambda e: self._reader_content_search())
-        self._bind_search_history(
-            cq_entry, "content",
-            lambda kw: (self._reader_content_query.set(kw), self._reader_content_search()))
-        RoundedButton(cq_f, text="搜索", bg=ACCENT, fg="white", relief=tk.FLAT,
-                  font=("Microsoft YaHei UI", 8), padx=8, cursor="hand2",
-                  command=self._reader_content_search).pack(side=tk.RIGHT, padx=(4, 0))
-
-        cq_tip = tk.Label(content_hdr, text="扫描所有文件内容，只显示包含该文本的文件",
-                          bg=PANEL, fg=DIM, font=("Microsoft YaHei UI", 7), anchor="w")
-        cq_tip.pack(fill=tk.X, pady=(0, 2))
-
-        # 内容搜索状态 + 清除按钮
-        cq_status_f = tk.Frame(left, bg=PANEL)
-        cq_status_f.pack(fill=tk.X, padx=8, pady=(0, 2))
-        self._reader_content_info = tk.StringVar(value="未进行内容搜索")
-        tk.Label(cq_status_f, textvariable=self._reader_content_info, bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 8), anchor="w").pack(side=tk.LEFT)
-        RoundedButton(cq_status_f, text="清除", bg="#454b63", fg="white",
-                  relief=tk.FLAT, font=("Microsoft YaHei UI", 8), padx=6,
-                  cursor="hand2", command=self._reader_content_clear).pack(side=tk.RIGHT)
-
-        tk.Frame(left, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
-
-        # ── 标记搜索（标签/笔记、页面文本、高亮原文 → 反向定位文件）──
-        mark_hdr = tk.Frame(left, bg=PANEL)
-        mark_hdr.pack(fill=tk.X, padx=8, pady=(2, 0))
-        mark_title_row = tk.Frame(mark_hdr, bg=PANEL)
-        mark_title_row.pack(fill=tk.X)
-        tk.Label(mark_title_row, text="🔖 标记搜索", bg=PANEL, fg=TEXT,
-                 font=("Microsoft YaHei UI", 9, "bold"), anchor="w").pack(side=tk.LEFT)
-        self._reader_tag_mode_btn = RoundedButton(
-            mark_title_row, text="🏷 标签", bg="#454b63", fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 8), padx=8, pady=1, cursor="hand2",
-            command=lambda: self._reader_set_mark_mode("tag"))
-        self._reader_tag_mode_btn.pack(side=tk.RIGHT)
-        self._reader_mark_mode_btn = RoundedButton(
-            mark_title_row, text="🔖 标记", bg=ACCENT, fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 8), padx=8, pady=1, cursor="hand2",
-            command=lambda: self._reader_set_mark_mode("mark"))
-        self._reader_mark_mode_btn.pack(side=tk.RIGHT, padx=(0, 4))
-
-        self._reader_mark_query = tk.StringVar(value="")
-        mq_f = tk.Frame(mark_hdr, bg=PANEL)
-        mq_f.pack(fill=tk.X, pady=(2, 0))
-        mq_entry = tk.Entry(mq_f, textvariable=self._reader_mark_query,
-                            bg=ENTRY, fg=TEXT, insertbackground=TEXT,
-                            relief=tk.FLAT, font=("Microsoft YaHei UI", 9))
-        mq_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-        self._bind_reader_text_input(mq_entry)
-        mq_entry.bind("<Return>", lambda e: self._reader_mark_search())
-        RoundedButton(mq_f, text="搜索", bg=ACCENT, fg="white", relief=tk.FLAT,
-                      font=("Microsoft YaHei UI", 8), padx=8, cursor="hand2",
-                      command=self._reader_mark_search).pack(side=tk.RIGHT, padx=(4, 0))
-
-        self._reader_mark_info = tk.StringVar(value="搜标签/笔记、页面文本、高亮原文")
-        tk.Label(mark_hdr, textvariable=self._reader_mark_info, bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 7), anchor="w").pack(fill=tk.X, pady=(0, 2))
-
-        mark_lb_f = tk.Frame(left, bg=PANEL)
-        mark_lb_f.pack(fill=tk.X, padx=8, pady=(0, 2))
-        self._reader_mark_tree = ttk.Treeview(
-            mark_lb_f, show="tree", selectmode="browse", height=6)
-        self._reader_mark_tree.column("#0", width=420, stretch=False)
-        mark_vsb = ttk.Scrollbar(mark_lb_f, orient=tk.VERTICAL,
-                                 command=self._reader_mark_tree.yview)
-        mark_hsb = ttk.Scrollbar(mark_lb_f, orient=tk.HORIZONTAL,
-                                 command=self._reader_mark_tree.xview)
-        self._reader_mark_tree.configure(yscrollcommand=mark_vsb.set,
-                                         xscrollcommand=mark_hsb.set)
-        mark_hsb.pack(side=tk.BOTTOM, fill=tk.X)
-        mark_vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        self._reader_mark_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._reader_mark_tree.bind("<<TreeviewSelect>>", self._reader_tag_tree_on_select)
-        self._reader_mark_tree.bind("<<TreeviewOpen>>", self._reader_tag_tree_on_open)
-        self._reader_mark_tree.bind("<Motion>", self._reader_tag_tree_hover)
-        self._bind_tooltip(self._reader_mark_tree, self._reader_tag_tree_tooltip)
-
-        tk.Frame(left, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
-
-        # ── 网络 PDF 搜索（TI 官方直链 + 360 搜索，Bing 兜底）──
-        net_hdr = tk.Frame(left, bg=PANEL)
-        net_hdr.pack(fill=tk.X, padx=8, pady=(2, 0))
-        tk.Label(net_hdr, text="🌐 网络 PDF 搜索", bg=PANEL, fg=TEXT,
-                 font=("Microsoft YaHei UI", 9, "bold"), anchor="w").pack(fill=tk.X)
-
-        self._reader_net_query = tk.StringVar(value="")
-        nq_f = tk.Frame(net_hdr, bg=PANEL)
-        nq_f.pack(fill=tk.X, pady=(2, 0))
-        nq_entry = tk.Entry(nq_f, textvariable=self._reader_net_query,
-                            bg=ENTRY, fg=TEXT, insertbackground=TEXT,
-                            relief=tk.FLAT, font=("Microsoft YaHei UI", 9))
-        nq_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-        self._bind_reader_text_input(nq_entry)
-        nq_entry.bind("<Return>", lambda e: self._reader_net_search())
-        self._bind_search_history(
-            nq_entry, "net",
-            lambda kw: (self._reader_net_query.set(kw), self._reader_net_search()))
-        self._reader_net_search_btn = RoundedButton(
-            nq_f, text="搜索", bg=ACCENT, fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 8), padx=8, cursor="hand2",
-            command=self._reader_net_search)
-        self._reader_net_search_btn.pack(side=tk.RIGHT, padx=(4, 0))
-
-        tk.Label(net_hdr, text="输入型号，📄PDF预览 / 🌐浏览器打开",
-                 bg=PANEL, fg=DIM, font=("Microsoft YaHei UI", 7),
-                 anchor="w").pack(fill=tk.X, pady=(0, 2))
-
-        # 结果列表
-        net_lb_f = tk.Frame(left, bg=PANEL)
-        net_lb_f.pack(fill=tk.X, padx=8, pady=(0, 2))
-        self._reader_net_lb = tk.Listbox(
-            net_lb_f, bg=CARD, fg=TEXT, selectbackground=ACCENT,
-            font=("Microsoft YaHei UI", 8), relief=tk.FLAT, height=5,
-            bd=0, highlightthickness=0, activestyle="none")
-        net_sb = ttk.Scrollbar(net_lb_f, command=self._reader_net_lb.yview)
-        self._reader_net_lb.config(yscrollcommand=net_sb.set)
-        self._reader_net_lb.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        net_sb.pack(side=tk.RIGHT, fill=tk.Y)
-        self._reader_net_lb.bind("<<ListboxSelect>>", self._reader_net_on_select)
-        self._reader_net_bind_hover_tip()
-
-        # 重命名框
-        net_name_f = tk.Frame(left, bg=PANEL)
-        net_name_f.pack(fill=tk.X, padx=8, pady=(0, 2))
-        tk.Label(net_name_f, text="重命名", bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 7)).pack(side=tk.LEFT)
-        self._reader_net_name_var = tk.StringVar(value="")
-        ne = tk.Entry(net_name_f, textvariable=self._reader_net_name_var,
-                      bg=ENTRY, fg=TEXT, insertbackground=TEXT,
-                      relief=tk.FLAT, font=("Microsoft YaHei UI", 8))
-        ne.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=2, padx=(4, 0))
-        self._bind_reader_text_input(ne)
-
-        # 操作按钮行
-        net_btn_f = tk.Frame(left, bg=PANEL)
-        net_btn_f.pack(fill=tk.X, padx=8, pady=(0, 2))
-        RoundedButton(net_btn_f, text="另存为", bg=ACCENT, fg="white", relief=tk.FLAT,
-                      font=("Microsoft YaHei UI", 8), padx=6, cursor="hand2",
-                      command=self._reader_net_save_as).pack(side=tk.LEFT, padx=(0, 4))
-        RoundedButton(net_btn_f, text="存默认目录", bg="#454b63", fg="white", relief=tk.FLAT,
-                      font=("Microsoft YaHei UI", 8), padx=6, cursor="hand2",
-                      command=self._reader_net_save_default).pack(side=tk.LEFT, padx=(0, 4))
-        RoundedButton(net_btn_f, text="⚙ 目录", bg="#3a3f56", fg="white", relief=tk.FLAT,
-                      font=("Microsoft YaHei UI", 8), padx=6, cursor="hand2",
-                      command=self._reader_net_set_save_dir).pack(side=tk.LEFT)
-
-        # 状态 + 默认目录显示
-        net_status_f = tk.Frame(left, bg=PANEL)
-        net_status_f.pack(fill=tk.X, padx=8, pady=(0, 2))
-        self._reader_net_status = tk.StringVar(value="未搜索")
-        tk.Label(net_status_f, textvariable=self._reader_net_status, bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 7), anchor="w").pack(side=tk.LEFT)
-        self._reader_net_save_dir_var = tk.StringVar(
-            value=self._reader_net_save_dir or "(默认目录未设置)")
-        tk.Label(net_status_f, textvariable=self._reader_net_save_dir_var, bg=PANEL, fg=DIM,
-                 font=("Microsoft YaHei UI", 7), anchor="e").pack(side=tk.RIGHT)
 
         # 搜索过滤
         fhdr = tk.Frame(left, bg=PANEL)
@@ -11609,36 +10784,6 @@ class ExcelPdfSync(tk.Tk):
                    font=("Microsoft YaHei UI", 8, "bold"), padx=4, cursor="hand2",
                    command=lambda: self._reader_change_scroll_lines(1)).pack(side=tk.LEFT)
 
-        # ── 放大镜控件：放在导航栏最右侧 ──
-        mag_box = tk.Frame(nav_btn_frame, bg=PANEL)
-        mag_box.pack(side=tk.RIGHT, padx=(2, 4))
-        self._reader_magnifier_btn = RoundedButton(
-            mag_box, text="🔍 放大镜", bg="#454b63", fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 8, "bold"), padx=6, cursor="hand2",
-            command=self._toggle_reader_magnifier)
-        self._reader_magnifier_btn.pack(side=tk.LEFT, padx=(0, 4))
-        RoundedButton(mag_box, text="－", bg=ENTRY, fg=TEXT, relief=tk.FLAT,
-                   font=("Microsoft YaHei UI", 8, "bold"), padx=4, cursor="hand2",
-                   command=lambda: self._reader_change_magnifier_ratio(-0.5)).pack(side=tk.LEFT)
-        self._reader_magnifier_ratio_lbl = tk.Label(
-            mag_box, textvariable=self._reader_magnifier_ratio_text, bg=PANEL, fg=DIM,
-            font=("Microsoft YaHei UI", 8), width=4)
-        self._reader_magnifier_ratio_lbl.pack(side=tk.LEFT)
-        RoundedButton(mag_box, text="＋", bg=ENTRY, fg=TEXT, relief=tk.FLAT,
-                   font=("Microsoft YaHei UI", 8, "bold"), padx=4, cursor="hand2",
-                   command=lambda: self._reader_change_magnifier_ratio(0.5)).pack(side=tk.LEFT)
-
-        # ── 点击弹窗模式切换：完整 → 简略 → 关闭 循环 ──
-        _popup_labels = {"full": "📋 弹窗:完整", "minimal": "📋 弹窗:简略", "hidden": "📋 弹窗:关闭"}
-        _popup_colors = {"full": GREEN, "minimal": ACCENT, "hidden": "#454b63"}
-        self._reader_click_popup_btn = RoundedButton(
-            mag_box, text=_popup_labels[self._reader_click_popup_mode.get()],
-            bg=_popup_colors[self._reader_click_popup_mode.get()],
-            fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 8, "bold"), padx=6, cursor="hand2",
-            command=self._toggle_reader_click_popup_mode)
-        self._reader_click_popup_btn.pack(side=tk.LEFT, padx=(0, 4))
-
         self._reader_fit_btn = RoundedButton(nav_btn_frame, text="🔲 适应宽度", bg=ACCENT, fg="white",
                                           relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
                                           padx=6, cursor="hand2",
@@ -11688,114 +10833,12 @@ class ExcelPdfSync(tk.Tk):
             padx=6, cursor="hand2", command=self._toggle_reader_body_crop_mode)
         self._reader_body_crop_btn.pack(side=tk.RIGHT, padx=1)
 
-        self._reader_region_label_btn = RoundedButton(
-            nav_btn_frame, text="📍 位置标注", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._toggle_ui_region_labels)
-        self._reader_region_label_btn.pack(side=tk.RIGHT, padx=1)
-
-        RoundedButton(
-            nav_btn_frame, text="📖 EPUB样式", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2",
-            command=self._show_epub_style_dialog).pack(side=tk.RIGHT, padx=1)
-
-        self._reader_dual_btn = RoundedButton(
-            nav_btn_frame, text="▦ 多开", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._show_reader_dual_menu)
-        self._reader_dual_btn.pack(side=tk.RIGHT, padx=1)
-
-        # ── 滚轮横滚模式控件 ──
-        self._reader_hscroll_btn = RoundedButton(
-            nav_btn_frame, text="🔄 横滚", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._toggle_reader_hscroll)
-        self._reader_hscroll_btn.pack(side=tk.RIGHT, padx=1)
-        self._reader_hscroll_pin_btn = RoundedButton(
-            nav_btn_frame, text="📌 钉PDF1(开)", bg=ACCENT, fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._toggle_reader_hscroll_pin1)
-        self._reader_hscroll_pin_btn.pack(side=tk.RIGHT, padx=1)
-        self._reader_hscroll_visible_var = tk.StringVar(value="2")
-        self._reader_hscroll_visible_combo = ttk.Combobox(
-            nav_btn_frame, textvariable=self._reader_hscroll_visible_var,
-            values=("1", "2", "3", "4"), state="readonly", width=2,
-            font=("Microsoft YaHei UI", 8))
-        self._reader_hscroll_visible_combo.pack(side=tk.RIGHT, padx=(0, 2))
-        self._reader_hscroll_visible_combo.bind(
-            "<<ComboboxSelected>>", self._on_reader_hscroll_visible_change)
-
         # 颜色主题选择按钮
         self._theme_btn = RoundedButton(nav_btn_frame, text="🎨 主题", bg="#454b63", fg="white",
                                      relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
                                      padx=6, cursor="hand2",
                                      command=self._show_theme_menu)
         self._theme_btn.pack(side=tk.RIGHT, padx=1)
-
-        # Edge浏览器切换按钮
-        self._edge_toggle_btn = RoundedButton(nav_btn_frame, text="🌐 Edge", bg="#454b63", fg="white",
-                                           relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-                                           padx=6, cursor="hand2",
-                                           command=self._toggle_edge_panel)
-        self._edge_toggle_btn.pack(side=tk.RIGHT, padx=1)
-
-        self._reader_ai_btn = RoundedButton(nav_btn_frame, text="AI 助手", bg="#454b63", fg="white",
-                                        relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-                                        padx=6, cursor="hand2",
-                                        command=self._toggle_reader_ai_panel)
-        self._reader_ai_btn.pack(side=tk.RIGHT, padx=1)
-
-        self._reader_toc_all_btn = RoundedButton(
-            nav_btn_frame, text="≡ 目录", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._toggle_all_toc)
-        self._reader_toc_all_btn.pack(side=tk.RIGHT, padx=1)
-
-        self._reader_match_nav_btn = RoundedButton(
-            nav_btn_frame, text="≡ 匹配", bg=ACCENT, fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._toggle_match_col)
-        self._reader_match_nav_btn.pack(side=tk.RIGHT, padx=1)
-
-        # 联动搜索切换按钮
-        _ll_colors = {True: GREEN, False: "#454b63"}
-        _ll_labels = {True: "🔗 联动搜索:开", False: "🔗 联动搜索:关"}
-        self._reader_linked_btn = RoundedButton(
-            nav_btn_frame, text=_ll_labels[self._reader_linked_search.get()],
-            bg=_ll_colors[self._reader_linked_search.get()],
-            fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 8, "bold"), padx=6, cursor="hand2",
-            command=self._toggle_reader_linked_search)
-        self._reader_linked_btn.pack(side=tk.RIGHT, padx=1)
-
-        # 同步滚动切换按钮：滚/缩一个阅读区，其它阅读区按页码与缩放联动
-        self._reader_sync_btn = RoundedButton(
-            nav_btn_frame, text="🔄 同步滚动", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._toggle_reader_sync_scroll)
-        self._reader_sync_btn.pack(side=tk.RIGHT, padx=1)
-
-        # 快捷键查看/设置按钮
-        self._shortcut_btn = RoundedButton(
-            nav_btn_frame, text="⌨ 快捷键", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._show_shortcut_settings)
-        self._shortcut_btn.pack(side=tk.RIGHT, padx=1)
-
-        # 跨程序发送：点击文本 → 复制并发送到其它程序实例的 Everything 搜索栏
-        self._reader_cross_send_btn = RoundedButton(
-            nav_btn_frame, text="↗ 跨程序发送", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._show_cross_send_dialog)
-        self._reader_cross_send_btn.pack(side=tk.RIGHT, padx=1)
-
-        # 工作区快照：保存/切换 多文档组合 + 阅读位置 + 主题（需求3）
-        self._reader_workspace_btn = RoundedButton(
-            nav_btn_frame, text="💾 工作区", bg="#454b63", fg="white",
-            relief=tk.FLAT, font=("Microsoft YaHei UI", 8, "bold"),
-            padx=6, cursor="hand2", command=self._show_reader_workspace_menu)
-        self._reader_workspace_btn.pack(side=tk.RIGHT, padx=1)
 
         # 始终可见的文件栏开关；左侧栏完全隐藏后仍可从这里恢复。
         self._reader_left_nav_btn = RoundedButton(
@@ -12137,8 +11180,6 @@ class ExcelPdfSync(tk.Tk):
 
         # ── 第二、第三阅读区：目录/搜索/点击高亮均为独立会话 ──
         self._build_reader_aux_panel(reader_view_paned, 2)
-        self._build_reader_aux_panel(reader_view_paned, 3)
-        self._build_reader_aux_panel(reader_view_paned, 4)
         # 保留旧属性名，兼容已有清理与外部调用。
         self._reader_dual_frame = self._reader_aux[2]["frame"]
         self._reader_canvas2 = self._reader_aux[2]["canvas"]
@@ -12208,113 +11249,6 @@ class ExcelPdfSync(tk.Tk):
         # 存储当前匹配页码列表
         self._reader_match_pages = []
         self._reader_match_counts = {}
-
-        # ── Edge浏览器面板（PanedWindow右窗格，默认隐藏）──
-        edge_panel = tk.Frame(paned, bg=PANEL, width=520,
-                              highlightbackground=BORDER, highlightthickness=1)
-        # 先添加到PanedWindow，然后立即移除（默认隐藏状态）
-        paned.add(edge_panel)
-        paned.remove(edge_panel)  # 默认隐藏：从PanedWindow中移除
-        self._reader_edge_frame = edge_panel
-        self._reader_edge_frame.pack_propagate(False)
-
-        # Edge面板标题栏
-        edge_hdr = tk.Frame(edge_panel, bg=PANEL)
-        edge_hdr.pack(fill=tk.X, padx=8, pady=(4, 0))
-
-        self._reader_edge_title = tk.StringVar(value="🌐 Edge 搜索")
-        tk.Label(edge_hdr, textvariable=self._reader_edge_title, bg=PANEL, fg=TEXT,
-                 font=("Microsoft YaHei UI", 10, "bold"), anchor="w").pack(side=tk.LEFT)
-
-        # 关闭按钮
-        RoundedButton(edge_hdr, text="✕", bg="#454b63", fg="white", relief=tk.FLAT,
-                  font=("Microsoft YaHei UI", 8, "bold"), padx=6, cursor="hand2",
-                  command=self._toggle_edge_panel).pack(side=tk.RIGHT)
-
-        # 独立搜索栏：只有用户手动输入并确认时才导航 Edge。
-        edge_search_row = tk.Frame(edge_panel, bg=PANEL)
-        edge_search_row.pack(fill=tk.X, padx=8, pady=(2, 0))
-        self._reader_edge_search_var = tk.StringVar(value="")
-        self._reader_edge_engine = tk.StringVar(value="bing")
-        engine_box = ttk.Combobox(
-            edge_search_row, textvariable=self._reader_edge_engine,
-            values=("bing", "baidu", "google", "scholar"),
-            state="readonly", width=8, font=("Microsoft YaHei UI", 8))
-        engine_box.pack(side=tk.LEFT, padx=(0, 4))
-        edge_search_entry = tk.Entry(
-            edge_search_row, textvariable=self._reader_edge_search_var,
-            bg=ENTRY, fg=TEXT, insertbackground=TEXT, relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 9))
-        edge_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=1)
-        self._bind_reader_text_input(edge_search_entry)  # 确保嵌入Edge后输入框可获取焦点
-        edge_search_entry.bind(
-            "<Return>", lambda e: self._edge_search(self._reader_edge_search_var.get()))
-        RoundedButton(
-            edge_search_row, text="搜索", bg=ACCENT, fg="white", relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 8, "bold"), padx=8, cursor="hand2",
-            command=lambda: self._edge_search(
-                self._reader_edge_search_var.get())).pack(side=tk.RIGHT, padx=(4, 0))
-
-        tk.Frame(edge_panel, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
-
-        # 刷新/分离按钮
-        btn_row = tk.Frame(edge_panel, bg=PANEL)
-        btn_row.pack(fill=tk.X, padx=8, pady=(2, 0))
-
-        RoundedButton(btn_row, text="🔄 检测并嵌入Edge", bg=ACCENT, fg="white",
-                  relief=tk.FLAT, font=("Microsoft YaHei UI", 8), padx=8,
-                  cursor="hand2",
-                  command=self._manual_embed_edge).pack(side=tk.LEFT, padx=(0, 4))
-
-        self._edge_detach_btn = RoundedButton(btn_row, text="📤 分离为独立窗口",
-                                           bg="#454b63", fg="white", relief=tk.FLAT,
-                                           font=("Microsoft YaHei UI", 8), padx=6,
-                                           cursor="hand2",
-                                           command=self._unembed_edge_window)
-        self._edge_detach_btn.pack(side=tk.LEFT)
-        self._edge_detach_btn.config(state=tk.DISABLED)
-
-        tk.Frame(edge_panel, bg=BORDER, height=1).pack(fill=tk.X, padx=8, pady=2)
-
-        # Edge 嵌入区域（Edge窗口将被SetParent到这里）
-        edge_browser_frame = tk.Frame(edge_panel, bg=CARD)
-        edge_browser_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
-        edge_browser_frame.rowconfigure(0, weight=1)
-        edge_browser_frame.columnconfigure(0, weight=1)
-        self._reader_edge_browser_frame = edge_browser_frame
-
-        self._build_reader_ai_panel(paned)
-
-        # 嵌入状态变量
-        self._edge_embedded_hwnd = None      # 当前嵌入的Edge窗口句柄
-        self._edge_original_parent = None     # 原始父窗口
-        self._edge_original_style = None      # 原始窗口样式
-        self._edge_original_exstyle = None    # 原始扩展样式
-        self._edge_host_hwnd = None           # 宿主面板句柄
-        self._edge_webview_ready = False      # 是否已初始化
-        self._edge_webview_mode = ""          # embedded / fallback / ""
-        self._edge_resize_bound = False       # 是否绑定了resize事件
-        self._edge_window_owned = False       # 是否为程序启动的专用Edge窗口
-        self._reader_edge_enabled = False     # Edge面板是否由用户手动启用
-        self._edge_launch_token = 0           # 使旧的窗口检测任务失效
-        self._edge_launch_job = None
-        self._edge_launch_in_progress = False
-        self._edge_launch_initial_url = None
-        self._edge_pending_url = None
-        self._edge_search_history = []
-        self._edge_history_max = 20
-
-        # 左侧搜索栏历史：{栏key: {关键词: 搜索次数}}，下拉按次数降序
-        # 持久化数据已在 _load_config（__init__ 更早处）加载，这里只兜底初始化
-        if not hasattr(self, "_search_histories"):
-            self._search_histories = {}
-        self._search_history_max = 50
-        self._search_history_win = None
-        self._search_history_lb = None
-        self._search_history_items = []
-        self._search_history_apply = None
-        # 点击窗口任意处关闭搜索历史下拉（点击落在下拉内部时忽略）
-        self.bind_all("<Button-1>", self._on_global_click, add="+")
 
         self.after_idle(lambda: self._reader_set_active_slot(1))
 
@@ -13240,7 +12174,7 @@ class ExcelPdfSync(tk.Tk):
 
     def _reader_set_active_slot(self, slot):
         """设置文件列表下一次要替换的PDF阅读栏。"""
-        if slot not in (1, 2, 3, 4):
+        if slot not in (1, 2):
             return
         self._reader_active_slot = slot
         try:
@@ -13253,7 +12187,6 @@ class ExcelPdfSync(tk.Tk):
             state["frame"].config(
                 highlightbackground=ACCENT if aux_slot == slot else BORDER,
                 highlightthickness=2 if aux_slot == slot else 1)
-        self._reader_dual_btn.config(text=f"▦ 当前PDF {slot}")
         self._reader_update_active_page_info()
 
     # ── 滚轮横滚模式 ──
@@ -13674,7 +12607,7 @@ class ExcelPdfSync(tk.Tk):
     def _reader_open(self, full_path, rel_path):
         # ── 重入保护 + 文件存在性检查 ──
         if self._reader_opening:
-            return  # 正在打开中，忽略重复请求
+            return
         if not full_path or not os.path.isfile(full_path):
             messagebox.showerror("打开失败", f"文件不存在或路径无效:\n{full_path}")
             return
@@ -13682,15 +12615,7 @@ class ExcelPdfSync(tk.Tk):
         self._record_open(full_path)
         try:
             self._reader_opening = True
-            self._reader_clear_merged_slot(1)
             self._reader_doc_generation += 1
-            self._reader_occurrence_generation += 1
-            if self._reader_occurrence_window is not None:
-                try:
-                    self._reader_occurrence_window.destroy()
-                except Exception:
-                    pass
-                self._reader_occurrence_window = None
             generation = self._reader_doc_generation
             if self._reader_lazy_job:
                 try:
@@ -13709,90 +12634,34 @@ class ExcelPdfSync(tk.Tk):
                 self._reader_pdf.close()
                 self._reader_pdf = None
             self._reader_load_toc()
-            # 清空页面缓存
             self._reader_page_cache.clear()
-            self._reader_popup_page_cache.clear()
             self._reader_text_cache = None
             self._reader_word_index = None
             self._reader_yoffset_estimated = False
             self._reader_file_type = ""
-            # 清除匹配页码列
             self._reader_match_lb.delete(0, tk.END)
             self._reader_match_pages = []
             self._reader_match_counts = {}
             self._reader_refresh_main_match_flow()
             self._reader_match_count_var.set("")
             self._reader_preview_search.set("")
-            # 切换回PDF预览视图（默认）
-            if self._reader_text_frame:
-                self._reader_text_frame.grid_remove()
-            if self._reader_code_frame:
-                self._reader_code_frame.grid_remove()
-            if self._reader_html_frame:
-                self._reader_html_frame.grid_remove()
             self._reader_canvas.grid()
 
             ext = os.path.splitext(full_path)[1].lower()
+            if ext != ".pdf":
+                messagebox.showerror("打开失败", f"仅支持 PDF 文件:\n{rel_path}")
+                return
             self._reader_file_type = ext
-            self._reader_current_path = full_path if ext == ".pdf" else ""
-            # 不管打开的是什么类型的文件，这个变量都会被无条件更新——
-            # 专门给"常用文件"等需要"当前到底打开的是哪个文件"的功能使用，
-            # 避免像 _reader_current_path（仅PDF）/_reader_html_path（仅HTML）
-            # 那样，切换到别的文件类型后旧值没清空、一直"卡"在之前的文件上。
+            self._reader_current_path = full_path
             self._reader_active_file_path = full_path
-
-            if ext == ".pdf":
-                doc = fitz.open(full_path)
-                self._reader_apply_pdf_doc(doc, rel_path, icon="📄", generation=generation)
-                # 内容搜索匹配：自动填充预览搜索并跳转到匹配页
-                if (self._reader_content_search_text
-                        and full_path in self._reader_content_match_pages):
-                    pages = self._reader_content_match_pages[full_path]
-                    if pages:
-                        query = self._reader_content_search_text
-                        self._reader_preview_search.set(query)
-                        self._reader_highlight_keywords = [query]
-                        self._reader_highlight_exact = False
-                        self._reader_match_pages = pages
-                        self._reader_match_counts = {pg: 1 for pg in pages}
-                        self._reader_match_lb.delete(0, tk.END)
-                        for pg in pages:
-                            self._reader_match_lb.insert(tk.END, f"  {pg + 1}")
-                        self._reader_match_count_var.set(self._fmt_match_count(len(pages), sum(self._reader_match_counts.values())))
-                        self._reader_refresh_main_match_flow()
-                        first_page = pages[0]
-                        self._reader_page = first_page
-                        self._reader_render(keywords=[query])
-                        self._reader_update_active_page_info()
-                        self._reader_highlight_thumb()
-                        self._reader_scroll_to_page(first_page)
-                        self._reader_center_match_on_page(query, first_page)
-            elif ext == ".md":
-                self._reader_open_text_file(full_path, rel_path)
-            elif ext in (".ppt", ".pptx"):
-                self._reader_open_ppt_file(full_path, rel_path)
-            elif ext == ".epub":
-                self._reader_open_epub_file(full_path, rel_path)
-            elif ext in (".html", ".htm"):
-                self._reader_open_html_file(full_path, rel_path)
-            elif ext in CODE_VIEW_EXTS:
-                self._reader_open_code_file(full_path, rel_path)
-            elif ext in IMAGE_EXTS:
-                self._reader_open_image_file(full_path, rel_path)
-            elif ext in OFFICE_EXTS:
-                self._reader_open_office_file(full_path, rel_path)
-            else:
-                self._reader_show_text_preview(f"不支持的文件类型: {ext}\n\n文件: {rel_path}\n路径: {full_path}", f"❌ {rel_path}")
-                self._reader_page_var.set("不支持")
-                self._reader_update_active_page_info()
-                self._reader_thumb_canvas.delete("all")
+            doc = fitz.open(full_path)
+            self._reader_apply_pdf_doc(doc, rel_path, icon="📄", generation=generation)
         except Exception as e:
             messagebox.showerror("打开失败", f"无法打开文件: {e}")
             self._reader_pdf = None
             self._reader_load_toc()
         finally:
             self._reader_opening = False
-
     def _reader_open_office_file(self, full_path, rel_path):
         """Office 文件（doc/docx/xls/xlsx）在右侧预览区直接预览文本内容。
 
@@ -20074,47 +18943,16 @@ class ExcelPdfSync(tk.Tk):
             return False
 
     def _setup_keyboard_shortcuts(self):
-        """
-        统一注册应用内快捷键，目标是把高频操作都纳入键盘流，减少鼠标
-        点击次数：
-          Ctrl+1~5      切换页签
-          PageUp/Down、左右方向键   文件阅读页签内翻页（PDF1）
-          Home / End     跳到第一页 / 最后一页
-          Ctrl+F         聚焦预览搜索框（即使当前在别的页签，也会自动
-                         切到"文件阅读"页签并跳进搜索框，类似浏览器的
-                         Ctrl+F体验）
-          Ctrl+B         给当前页添加标记
-          Ctrl+Shift+B   显示/隐藏标记面板
-          Ctrl+ / Ctrl-  放大 / 缩小当前PDF
-          Ctrl+0         恢复"适应宽度"
-          Ctrl+M         开启/关闭放大镜
-          Ctrl+Shift+M   锁定/解锁放大镜
-          Ctrl+E         开启/关闭智能裁边
-          Ctrl+W         开启/关闭适应宽度
-          Alt+1~4        切换当前 PDF 阅读区
-
-        除了Ctrl+F（本身就是"跳转过去"的语义，随时可用）之外，其余快捷键
-        在用户焦点正落在文本框/笔记框里时会自动不生效，避免打字被打断。
-        """
+        """应用内快捷键：翻页 / 缩放 / 聚焦搜索 / 添加标记。"""
         self._shortcut_bound_seqs = set()
         self._shortcut_apply_bindings()
 
     def _shortcut_registry(self):
-        """快捷键注册表：返回 [(id, 说明, 默认绑定序列, 处理函数), ...]。
-        改键对话框和重新注册都读这里，保证「列表显示」与「实际绑定」一致。"""
-        tab_frames = [self._tab_pdf, self._tab_compare, self._tab_pdf_cmp,
-                      self._tab_reader, self._tab_pdf_diff]
-        tab_labels = ["Excel联动", "Excel对比", "PDF对比", "文件阅读", "PDF差异"]
-        reg = []
-        for i, frame in enumerate(tab_frames, start=1):
-            reg.append((f"tab_{i}", f"切换页签·{tab_labels[i - 1]}",
-                        [f"<Control-Key-{i}>"],
-                        lambda e, f=frame: (self._notebook.select(f), "break")[1]))
-        reg += [
+        """快捷键注册表：返回 [(id, 说明, 默认绑定序列, 处理函数), ...]。"""
+        reg = [
             ("focus_search", "聚焦搜索框", ["<Control-f>", "<Control-F>"], self._shortcut_focus_search),
             ("add_bookmark", "添加标记", ["<Control-b>", "<Control-B>"], self._shortcut_add_bookmark),
             ("toggle_bookmarks", "显示/隐藏标记面板", ["<Control-Shift-B>", "<Control-Shift-b>"], self._shortcut_toggle_bookmarks),
-            ("toggle_notes", "笔记窗口", ["<Control-n>", "<Control-N>"], self._shortcut_toggle_notes),
             ("page_prev", "上一页", ["<Prior>", "<Left>"], lambda e: self._shortcut_reader_page(-1)),
             ("page_next", "下一页", ["<Next>", "<Right>"], lambda e: self._shortcut_reader_page(1)),
             ("first_page", "跳到第一页", ["<Home>"], self._shortcut_reader_first_page),
@@ -20122,12 +18960,10 @@ class ExcelPdfSync(tk.Tk):
             ("zoom_in", "放大", ["<Control-equal>", "<Control-plus>"], lambda e: self._shortcut_reader_zoom(1.15)),
             ("zoom_out", "缩小", ["<Control-minus>"], lambda e: self._shortcut_reader_zoom(1 / 1.15)),
             ("zoom_reset", "恢复适应宽度", ["<Control-Key-0>"], self._shortcut_reader_zoom_reset),
-            ("toggle_magnifier", "开启/关闭放大镜", ["<Control-m>", "<Control-M>"], self._shortcut_toggle_magnifier),
-            ("toggle_magnifier_pin", "锁定/解锁放大镜", ["<Control-Shift-M>", "<Control-Shift-m>"], self._shortcut_toggle_magnifier_pin),
             ("toggle_crop", "开启/关闭智能裁边", ["<Control-e>", "<Control-E>"], self._shortcut_toggle_crop),
             ("toggle_fit_width", "开启/关闭适应宽度", ["<Control-w>", "<Control-W>"], self._shortcut_toggle_fit_width),
         ]
-        for s in (1, 2, 3, 4):
+        for s in (1, 2):
             reg.append((f"slot_{s}", f"切换阅读区·PDF{s}",
                         [f"<Alt-Key-{s}>"],
                         lambda e, s=s: self._shortcut_set_active_slot(s)))
@@ -26790,43 +25626,9 @@ class ExcelPdfSync(tk.Tk):
     # ════════════════════════════════════════════════════════════════
 
     def on_close(self):
-        self._quadrant_reminder_stop = True  # 停止提醒检查器
-        self._stop_global_hotkey_listener()
-        if self._pomodoro_job:
-            try:
-                self.after_cancel(self._pomodoro_job)
-            except Exception:
-                pass
-            self._pomodoro_job = None
-        if self._motivation_scroll_job:
-            try:
-                self.after_cancel(self._motivation_scroll_job)
-            except Exception:
-                pass
-            self._motivation_scroll_job = None
-        self._reader_ai_task_id += 1
         self._reader_doc_generation += 1
-        self._reader_occurrence_generation += 1
-        if self._reader_occurrence_window is not None:
-            try:
-                self._reader_occurrence_window.destroy()
-            except Exception:
-                pass
-            self._reader_occurrence_window = None
-        if self._reader_merged_occurrence_window is not None:
-            try:
-                self._reader_merged_occurrence_window.destroy()
-            except Exception:
-                pass
-            self._reader_merged_occurrence_window = None
-        if self._reader_merged_geometry_job:
-            try:
-                self.after_cancel(self._reader_merged_geometry_job)
-            except Exception:
-                pass
-            self._reader_merged_geometry_job = None
-        self._edge_launch_token += 1
-        for job_name in ("_edge_launch_job",):
+        for job_name in ("_reader_lazy_job", "_reader_scroll_job", "_reader_render_job",
+                         "_reader_zoom_job", "_reader_scroll_anim_job"):
             job = getattr(self, job_name, None)
             if job:
                 try:
@@ -26834,27 +25636,6 @@ class ExcelPdfSync(tk.Tk):
                 except Exception:
                     pass
                 setattr(self, job_name, None)
-        if getattr(self, "_edge_embedded_hwnd", None):
-            self._unembed_edge_window(close_owned=True)
-        if self._poll_job:
-            self.after_cancel(self._poll_job)
-        if self._reader_lazy_job:
-            try:
-                self.after_cancel(self._reader_lazy_job)
-            except Exception:
-                pass
-        self._clear_xl_highlights()
-        self._clear_compare_highlights()
-        if self.pdf_doc:
-            self.pdf_doc.close()
-        if self._pdf_doc_left:
-            self._pdf_doc_left.close()
-        if self._pdf_doc_right:
-            self._pdf_doc_right.close()
-        if self._pdf_doc1:
-            self._pdf_doc1.close()
-        if self._pdf_doc2:
-            self._pdf_doc2.close()
         self._reader_save_resume()
         for slot in self._reader_aux:
             self._reader_save_aux_resume(slot)
@@ -26868,17 +25649,11 @@ class ExcelPdfSync(tk.Tk):
                         self.after_cancel(state[key])
                     except Exception:
                         pass
-            if state.get("occurrence_window"):
-                try:
-                    state["occurrence_window"].destroy()
-                except Exception:
-                    pass
             if state.get("doc"):
                 try:
                     state["doc"].close()
                 except Exception:
                     pass
-        # 清理差异对比图像引用和弹窗
         for image in self._diff_images:
             try:
                 image.close()
@@ -26886,17 +25661,6 @@ class ExcelPdfSync(tk.Tk):
                 pass
         self._diff_images.clear()
         self._reader_page_cache.clear()
-        self._reader_popup_page_cache.clear()
-        self._pdf_word_cache.clear()
-        self._diff_close_popup()
-        # 多实例联动：取消收件箱轮询、清理注册/收件箱文件、释放互斥体
-        if self._ipc_poll_job:
-            try:
-                self.after_cancel(self._ipc_poll_job)
-            except Exception:
-                pass
-            self._ipc_poll_job = None
-        self._ipc_cleanup()
         self.destroy()
 
     # ════════════════════════════════════════════════════════════════
