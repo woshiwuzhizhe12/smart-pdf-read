@@ -7481,8 +7481,14 @@ class ExcelPdfSync(tk.Tk):
                 break
         if clicked_word:
             self._reader_last_clicked_word = clicked_word
+            # 联动搜索：如果开启，同步搜索所有已打开文件
+            if self._reader_linked_search.get():
+                self._reader_linked_search_all(clicked_word, source_slot=slot)
+            # 匹配：在阅读区 slot 内搜索该词并高亮 + 显示命中页
+            self._reader_aux_search(slot, clicked_word, exact=True, show_preview=True)
         else:
             canvas.scan_mark(event.x, event.y)
+
     def _reader_capture_merged_geometry(self, win):
         if not win or self._reader_merged_occurrence_window is not win:
             return
@@ -12055,7 +12061,7 @@ class ExcelPdfSync(tk.Tk):
             self, tearoff=0, bg=PANEL, fg=TEXT,
             activebackground=ACCENT, activeforeground="white",
             font=("Microsoft YaHei UI", 9))
-        for slot in (2, 3, 4):
+        for slot in (2,):
             menu.add_command(
                 label=f"阅读区 {slot}：打开当前文件",
                 command=lambda s=slot: self._reader_dual_open_same(s))
@@ -12069,8 +12075,6 @@ class ExcelPdfSync(tk.Tk):
                 menu.add_command(
                     label=f"关闭 阅读区 {slot}",
                     command=lambda s=slot: self._reader_aux_close(s))
-            if slot == 3:
-                menu.add_separator()
         x = self._reader_dual_btn.winfo_rootx()
         y = self._reader_dual_btn.winfo_rooty() + self._reader_dual_btn.winfo_height()
         menu.post(x, y)
@@ -12086,8 +12090,7 @@ class ExcelPdfSync(tk.Tk):
         """手动选择一份文件在指定阅读区打开（支持所有支持的文件格式）。"""
         path = filedialog.askopenfilename(
             title=f"选择 PDF {slot} 文件",
-            filetypes=[("支持的文件", "*.pdf;*.epub;*.ppt;*.pptx;*.png;*.jpg;*.jpeg;*.bmp;*.gif"),
-                       ("PDF文件", "*.pdf"), ("所有文件", "*.*")])
+            filetypes=[("PDF文件", "*.pdf"), ("所有文件", "*.*")])
         if path:
             self._reader_dual_open_path(path, slot)
 
