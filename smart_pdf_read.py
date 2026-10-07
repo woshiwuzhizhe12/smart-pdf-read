@@ -12708,7 +12708,7 @@ if __name__ == "__main__":
             # 连tkinter都用不了时，写入桌面日志文件
             import os as _os
             log_path = _os.path.join(_os.path.expanduser("~"), "Desktop",
-                                      "excel_pdf_sync_crash.txt")
+                                      "smart_pdf_read_crash.txt")
             with open(log_path, "w", encoding="utf-8") as _f:
                 _f.write(_err_detail)
             print(f"崩溃日志已写入: {log_path}")
