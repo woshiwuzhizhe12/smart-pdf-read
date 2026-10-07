@@ -1,0 +1,8 @@
+PyMuPDF
+Pillow
+numpy
+pywin32
+openpyxl
+xlrd
+EbookLib
+tkinterweb
